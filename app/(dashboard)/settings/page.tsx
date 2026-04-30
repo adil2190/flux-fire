@@ -1,6 +1,6 @@
 "use client"
 
-import { Settings, Zap, Moon, Sun, Monitor } from "lucide-react"
+import { Zap, Moon, Sun, Monitor } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -14,7 +14,7 @@ export default function SettingsPage() {
     useProjectStore()
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex h-full flex-col overflow-auto p-6">
       <div className="mb-6">
         <h1 className="text-2xl font-bold">Settings</h1>
         <p className="text-muted-foreground">

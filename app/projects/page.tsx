@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
 import { useSession, signOut } from "next-auth/react"
 import { toast } from "sonner"
@@ -38,7 +38,7 @@ export default function ProjectsPage() {
   )
   const { setSelectedProject, setFirebaseConfig } = useProjectStore()
 
-  const projects = data?.projects || []
+  const projects = useMemo(() => data?.projects ?? [], [data?.projects])
   const filteredProjects = projects.filter(
     (p) =>
       p.displayName.toLowerCase().includes(search.toLowerCase()) ||
@@ -49,16 +49,15 @@ export default function ProjectsPage() {
     setSelectedProjectId(project.projectId)
   }
 
-  // Effect to handle config fetch completion
-  if (configData?.config && selectedProjectId) {
+  useEffect(() => {
+    if (!configData?.config || !selectedProjectId) return
     const project = projects.find((p) => p.projectId === selectedProjectId)
-    if (project) {
-      setSelectedProject(project)
-      setFirebaseConfig(configData.config)
-      toast.success(`Connected to ${project.displayName}`)
-      router.push("/firestore")
-    }
-  }
+    if (!project) return
+    setSelectedProject(project)
+    setFirebaseConfig(configData.config)
+    toast.success(`Connected to ${project.displayName}`)
+    router.push("/firestore")
+  }, [configData, selectedProjectId, projects, setSelectedProject, setFirebaseConfig, router])
 
   const userInitials = session?.user?.name
     ?.split(" ")

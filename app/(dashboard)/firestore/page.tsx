@@ -111,12 +111,12 @@ function FirestorePageContent() {
   }
 
   return (
-    <div className="grid h-full grid-cols-[260px_1fr_420px] overflow-hidden bg-card">
-      <div className="border-r overflow-hidden">
+    <div className="grid h-full grid-cols-[260px_1fr_420px] grid-rows-[minmax(0,1fr)] overflow-hidden bg-card">
+      <div className="min-h-0 overflow-hidden border-r">
         <CollectionsTree selectedPath={path} onSelect={(p) => setUrlPath(p)} />
       </div>
 
-      <div className="flex flex-col overflow-hidden">
+      <div className="flex min-h-0 flex-col overflow-hidden">
         {collectionPath ? (
           <CollectionView
             key={`${collectionPath}|${cgFlag}`}
@@ -135,7 +135,7 @@ function FirestorePageContent() {
         )}
       </div>
 
-      <div className="border-l overflow-hidden">
+      <div className="min-h-0 overflow-hidden border-l">
         <DocumentInspector
           docPath={docPath}
           onClose={() => {

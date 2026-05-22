@@ -5,7 +5,6 @@ import { useState } from "react"
 import { useCollectionIds } from "@/hooks/firestore/use-collection-ids"
 import { useDocuments } from "@/hooks/firestore/use-documents"
 import { Button } from "@/components/ui/button"
-import { ScrollArea } from "@/components/ui/scroll-area"
 import { cn } from "@/lib/utils"
 import { joinPath } from "@/lib/firestore/paths"
 
@@ -23,7 +22,7 @@ export function CollectionsTree({ selectedPath, onSelect }: Props) {
         <Database className="h-4 w-4 text-muted-foreground" />
         <span className="text-sm font-medium">Collections</span>
       </div>
-      <ScrollArea className="flex-1">
+      <div className="flex-1 overflow-auto">
         <div className="p-1">
           {isLoading && (
             <div className="flex items-center gap-2 px-3 py-2 text-xs text-muted-foreground">
@@ -50,7 +49,7 @@ export function CollectionsTree({ selectedPath, onSelect }: Props) {
             <p className="px-3 py-2 text-xs text-muted-foreground">No collections yet</p>
           )}
         </div>
-      </ScrollArea>
+      </div>
     </div>
   )
 }

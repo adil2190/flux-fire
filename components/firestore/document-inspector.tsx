@@ -5,7 +5,6 @@ import { Loader2, Save, Trash2, X, Plus, ChevronRight } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { ScrollArea } from "@/components/ui/scroll-area"
 import { Badge } from "@/components/ui/badge"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { toast } from "sonner"
@@ -107,8 +106,7 @@ export function DocumentInspector({ docPath, onClose, onNavigate }: Props) {
           <TabsTrigger value="raw" className="text-xs">Raw JSON</TabsTrigger>
         </TabsList>
 
-        <TabsContent value="fields" className="flex-1 overflow-hidden">
-          <ScrollArea className="h-full">
+        <TabsContent value="fields" className="flex-1 overflow-auto">
             <div className="space-y-3 p-3">
               {fieldNames.map((name) => (
                 <FieldRow
@@ -157,21 +155,16 @@ export function DocumentInspector({ docPath, onClose, onNavigate }: Props) {
                 <Plus className="h-3.5 w-3.5" /> Add field
               </Button>
             </div>
-          </ScrollArea>
         </TabsContent>
 
-        <TabsContent value="subcollections" className="flex-1 overflow-hidden">
-          <ScrollArea className="h-full">
-            <SubcollectionsList docPath={doc.path} onNavigate={onNavigate} />
-          </ScrollArea>
+        <TabsContent value="subcollections" className="flex-1 overflow-auto">
+          <SubcollectionsList docPath={doc.path} onNavigate={onNavigate} />
         </TabsContent>
 
-        <TabsContent value="raw" className="flex-1 overflow-hidden">
-          <ScrollArea className="h-full">
-            <pre className="p-3 font-mono text-[11px]">
-              {JSON.stringify(plainFields(draft), null, 2)}
-            </pre>
-          </ScrollArea>
+        <TabsContent value="raw" className="flex-1 overflow-auto">
+          <pre className="p-3 font-mono text-[11px]">
+            {JSON.stringify(plainFields(draft), null, 2)}
+          </pre>
         </TabsContent>
       </Tabs>
 

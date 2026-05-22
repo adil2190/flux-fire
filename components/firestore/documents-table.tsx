@@ -12,7 +12,6 @@ import {
 } from "@/components/ui/table"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Button } from "@/components/ui/button"
-import { ScrollArea } from "@/components/ui/scroll-area"
 import { Badge } from "@/components/ui/badge"
 import { fieldValueToPlain } from "@/lib/firestore/encoding"
 import { cn } from "@/lib/utils"
@@ -66,7 +65,7 @@ export function DocumentsTable({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-      <ScrollArea className="flex-1">
+      <div className="flex-1 overflow-auto">
         <Table>
           <TableHeader>
             <TableRow>
@@ -164,7 +163,7 @@ export function DocumentsTable({
             })}
           </TableBody>
         </Table>
-      </ScrollArea>
+      </div>
       {pagination && (
         <div className="flex items-center justify-between border-t px-4 py-2 text-xs text-muted-foreground">
           <span>

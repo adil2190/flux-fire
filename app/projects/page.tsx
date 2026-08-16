@@ -23,11 +23,13 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { useProjects, useProjectConfig } from "@/hooks/use-projects"
+import { useQueryClient } from "@tanstack/react-query"
 import { useProjectStore } from "@/stores/project-store"
 import type { FirebaseProject } from "@/types/project"
 
 export default function ProjectsPage() {
   const router = useRouter()
+  const qc = useQueryClient()
   const { data: session } = useSession()
   const [search, setSearch] = useState("")
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null)
@@ -36,7 +38,16 @@ export default function ProjectsPage() {
   const { data: configData, isLoading: configLoading } = useProjectConfig(
     selectedProjectId ?? undefined
   )
-  const { setSelectedProject, setFirebaseConfig } = useProjectStore()
+  const { setSelectedProject, setFirebaseConfig, disconnect } = useProjectStore()
+
+  const handleSignOut = () => {
+    qc.removeQueries({ queryKey: ["firestore"] })
+    qc.removeQueries({ queryKey: ["firebase-config"] })
+    qc.removeQueries({ queryKey: ["firebase-project-access"] })
+    qc.removeQueries({ queryKey: ["firebase-projects"] })
+    disconnect()
+    signOut({ callbackUrl: "/login" })
+  }
 
   const projects = useMemo(() => data?.projects ?? [], [data?.projects])
   const filteredProjects = projects.filter(
@@ -90,7 +101,7 @@ export default function ProjectsPage() {
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
-              <DropdownMenuItem onClick={() => signOut({ callbackUrl: "/login" })}>
+              <DropdownMenuItem onClick={handleSignOut}>
                 <LogOut className="mr-2 h-4 w-4" />
                 Sign out
               </DropdownMenuItem>

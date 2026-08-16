@@ -2,6 +2,15 @@ import { NextResponse } from "next/server"
 import { auth } from "@/lib/auth"
 import type { FirebaseWebApp, FirebaseConfig } from "@/types/project"
 
+function json(body: unknown, status = 200) {
+  return NextResponse.json(body, {
+    status,
+    headers: {
+      "Cache-Control": "private, no-store, max-age=0",
+    },
+  })
+}
+
 export async function GET(
   request: Request,
   { params }: { params: Promise<{ projectId: string }> }
@@ -11,16 +20,14 @@ export async function GET(
     const { projectId } = await params
 
     if (!session?.accessToken) {
-      return NextResponse.json(
-        { error: "Unauthorized" },
-        { status: 401 }
-      )
+      return json({ error: "Unauthorized" }, 401)
     }
 
     // First, get the list of web apps for this project
     const appsResponse = await fetch(
       `https://firebase.googleapis.com/v1beta1/projects/${projectId}/webApps`,
       {
+        cache: "no-store",
         headers: {
           Authorization: `Bearer ${session.accessToken}`,
         },
@@ -31,7 +38,7 @@ export async function GET(
       // If no web apps exist, we can try to create one or return a minimal config
       if (appsResponse.status === 404) {
         // Return a minimal config that allows basic operations
-        return NextResponse.json({
+        return json({
           config: {
             projectId,
             apiKey: "", // User will need to get this from Firebase Console
@@ -44,17 +51,14 @@ export async function GET(
 
       const error = await appsResponse.text()
       console.error("Firebase API error (apps):", error)
-      return NextResponse.json(
-        { error: "Failed to fetch web apps" },
-        { status: appsResponse.status }
-      )
+      return json({ error: "Failed to fetch web apps" }, appsResponse.status)
     }
 
     const appsData = await appsResponse.json()
     const apps: FirebaseWebApp[] = appsData.apps || []
 
     if (apps.length === 0) {
-      return NextResponse.json({
+      return json({
         config: {
           projectId,
           apiKey: "",
@@ -70,6 +74,7 @@ export async function GET(
     const configResponse = await fetch(
       `https://firebase.googleapis.com/v1beta1/${appName}/config`,
       {
+        cache: "no-store",
         headers: {
           Authorization: `Bearer ${session.accessToken}`,
         },
@@ -79,20 +84,14 @@ export async function GET(
     if (!configResponse.ok) {
       const error = await configResponse.text()
       console.error("Firebase API error (config):", error)
-      return NextResponse.json(
-        { error: "Failed to fetch config" },
-        { status: configResponse.status }
-      )
+      return json({ error: "Failed to fetch config" }, configResponse.status)
     }
 
     const config: FirebaseConfig = await configResponse.json()
 
-    return NextResponse.json({ config })
+    return json({ config })
   } catch (error) {
     console.error("Error fetching project config:", error)
-    return NextResponse.json(
-      { error: "Internal server error" },
-      { status: 500 }
-    )
+    return json({ error: "Internal server error" }, 500)
   }
 }

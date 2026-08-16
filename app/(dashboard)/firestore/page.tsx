@@ -1,6 +1,6 @@
 "use client"
 
-import { Suspense, useCallback, useState } from "react"
+import { Suspense, useCallback, useMemo, useState } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { Database, Loader2, Plus } from "lucide-react"
 import { toast } from "sonner"
@@ -16,6 +16,10 @@ import { DocumentInspector } from "@/components/firestore/document-inspector"
 import { BulkActionsBar } from "@/components/firestore/bulk-actions-bar"
 import { ScopeBanner } from "@/components/firestore/scope-banner"
 import { NewDocumentDialog } from "@/components/firestore/new-document-dialog"
+import {
+  FirestoreTabsBar,
+  type FirestoreTab,
+} from "@/components/firestore/firestore-tabs-bar"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import {
@@ -27,6 +31,7 @@ import {
 } from "@/lib/firestore/paths"
 import { FirestoreError, isPermissionDenied } from "@/lib/firestore/errors"
 import { exportCsv, exportJson, downloadBlob } from "@/lib/firestore/export"
+import { collectFieldPaths } from "@/lib/firestore/fields"
 import type { QueryState } from "@/types/firestore"
 
 const PAGE_SIZE = 50
@@ -67,26 +72,113 @@ function FirestorePageContent() {
 
   const path = searchParams.get("path") ?? ""
   const cgFlag = searchParams.get("cg") === "1"
-
-  const collectionPath = (() => {
-    if (!path) return ""
-    if (isCollectionPath(path)) return path
-    if (isDocPath(path)) return parentCollection(path) ?? ""
-    return ""
-  })()
-  const docPath = isDocPath(path) ? path : null
+  const [tabs, setTabs] = useState<FirestoreTab[]>(() => [
+    { id: "initial", path, collectionGroup: cgFlag },
+  ])
+  const [fallbackActiveTabId, setFallbackActiveTabId] = useState("initial")
+  const urlTabId = searchParams.get("tab")
+  const urlOwnerTabId = urlTabId
+    ? tabs.some((tab) => tab.id === urlTabId)
+      ? urlTabId
+      : undefined
+    : tabs.some((tab) => tab.id === "initial")
+      ? "initial"
+      : undefined
+  const activeTabId = urlOwnerTabId ?? fallbackActiveTabId
 
   const setUrlPath = useCallback(
-    (next: string, opts: { cg?: boolean } = {}) => {
+    (next: string, opts: { cg?: boolean; tabId?: string } = {}) => {
       const params = new URLSearchParams(searchParams.toString())
       if (next) params.set("path", next)
       else params.delete("path")
       if (opts.cg) params.set("cg", "1")
       else params.delete("cg")
-      router.push(`/firestore?${params.toString()}`)
+      params.set("tab", opts.tabId ?? activeTabId)
+      const query = params.toString()
+      router.push(query ? `/firestore?${query}` : "/firestore")
     },
-    [router, searchParams]
+    [activeTabId, router, searchParams]
   )
+
+  const visibleTabs = tabs.map((tab) =>
+    tab.id === urlOwnerTabId
+      ? { ...tab, path, collectionGroup: cgFlag }
+      : tab
+  )
+
+  const selectTab = (tabId: string) => {
+    if (tabId === activeTabId) return
+    const target = tabs.find((tab) => tab.id === tabId)
+    if (!target) return
+
+    setTabs((current) =>
+      current.map((tab) =>
+        tab.id === activeTabId
+          ? { ...tab, path, collectionGroup: cgFlag }
+          : tab
+      )
+    )
+    setFallbackActiveTabId(tabId)
+    setUrlPath(target.path, {
+      cg: target.collectionGroup,
+      tabId: target.id,
+    })
+  }
+
+  const addTab = () => {
+    const id = createTabId()
+    setTabs((current) => [
+      ...current.map((tab) =>
+        tab.id === activeTabId
+          ? { ...tab, path, collectionGroup: cgFlag }
+          : tab
+      ),
+      { id, path: "", collectionGroup: false },
+    ])
+    setFallbackActiveTabId(id)
+    setUrlPath("", { tabId: id })
+  }
+
+  const openCollectionTab = (collectionPath: string) => {
+    const activeTab = visibleTabs.find((tab) => tab.id === activeTabId)
+
+    if (!activeTab?.path) {
+      setUrlPath(collectionPath, { tabId: activeTabId })
+      return
+    }
+
+    const id = createTabId()
+    setTabs((current) => [
+      ...current.map((tab) =>
+        tab.id === activeTabId
+          ? { ...tab, path, collectionGroup: cgFlag }
+          : tab
+      ),
+      { id, path: collectionPath, collectionGroup: false },
+    ])
+    setFallbackActiveTabId(id)
+    setUrlPath(collectionPath, { tabId: id })
+  }
+
+  const closeTab = (tabId: string) => {
+    if (tabs.length === 1) return
+
+    if (tabId !== activeTabId) {
+      setTabs((current) => current.filter((tab) => tab.id !== tabId))
+      return
+    }
+
+    const index = tabs.findIndex((tab) => tab.id === tabId)
+    const target = tabs[index + 1] ?? tabs[index - 1]
+    if (!target) return
+
+    setTabs((current) => current.filter((tab) => tab.id !== tabId))
+    setFallbackActiveTabId(target.id)
+    setUrlPath(target.path, {
+      cg: target.collectionGroup,
+      tabId: target.id,
+    })
+  }
 
   if (!selectedProject) {
     return (
@@ -111,19 +203,78 @@ function FirestorePageContent() {
   }
 
   return (
-    <div className="grid h-full grid-cols-[260px_1fr_420px] grid-rows-[minmax(0,1fr)] overflow-hidden bg-card">
-      <div className="min-h-0 overflow-hidden border-r">
-        <CollectionsTree selectedPath={path} onSelect={(p) => setUrlPath(p)} />
+    <div className="grid h-full grid-cols-[260px_minmax(0,1fr)_420px] grid-rows-[36px_minmax(0,1fr)] overflow-hidden bg-card">
+      <div className="col-start-1 row-span-2 min-h-0 overflow-hidden border-r">
+        <CollectionsTree
+          selectedPath={path}
+          onSelect={(next) => {
+            if (isCollectionPath(next)) openCollectionTab(next)
+            else setUrlPath(next)
+          }}
+        />
       </div>
 
-      <div className="flex min-h-0 flex-col overflow-hidden">
+      <div className="col-span-2 col-start-2 row-start-1 min-w-0">
+        <FirestoreTabsBar
+          tabs={visibleTabs}
+          activeTabId={activeTabId}
+          onSelect={selectTab}
+          onClose={closeTab}
+          onAdd={addTab}
+        />
+      </div>
+
+      {visibleTabs.map((tab) => (
+        <FirestoreWorkspace
+          key={tab.id}
+          tab={tab}
+          active={tab.id === activeTabId}
+          onNavigate={(next, collectionGroup) =>
+            setUrlPath(next, { cg: collectionGroup })
+          }
+        />
+      ))}
+    </div>
+  )
+}
+
+interface FirestoreWorkspaceProps {
+  tab: FirestoreTab
+  active: boolean
+  onNavigate: (path: string, collectionGroup: boolean) => void
+}
+
+function FirestoreWorkspace({
+  tab,
+  active,
+  onNavigate,
+}: FirestoreWorkspaceProps) {
+  const collectionPath = (() => {
+    if (!tab.path) return ""
+    if (isCollectionPath(tab.path)) return tab.path
+    if (isDocPath(tab.path)) return parentCollection(tab.path) ?? ""
+    return ""
+  })()
+  const docPath = isDocPath(tab.path) ? tab.path : null
+
+  return (
+    <>
+      <div
+        id={`firestore-panel-${tab.id}`}
+        role="tabpanel"
+        aria-labelledby={`firestore-tab-${tab.id}`}
+        hidden={!active}
+        className="col-start-2 row-start-2 flex min-h-0 flex-col overflow-hidden"
+      >
         {collectionPath ? (
           <CollectionView
-            key={`${collectionPath}|${cgFlag}`}
+            key={`${collectionPath}|${tab.collectionGroup}`}
             collectionPath={collectionPath}
-            cgFlag={cgFlag}
+            cgFlag={tab.collectionGroup}
             docPath={docPath}
-            onOpenDocument={(p) => setUrlPath(p, { cg: cgFlag })}
+            onOpenDocument={(next) =>
+              onNavigate(next, tab.collectionGroup)
+            }
           />
         ) : (
           <div className="flex flex-1 items-center justify-center text-center text-sm text-muted-foreground">
@@ -135,18 +286,29 @@ function FirestorePageContent() {
         )}
       </div>
 
-      <div className="min-h-0 overflow-hidden border-l">
+      <div
+        hidden={!active}
+        className="col-start-3 row-start-2 min-h-0 overflow-hidden border-l"
+      >
         <DocumentInspector
           docPath={docPath}
           onClose={() => {
-            const parent = docPath ? parentCollection(docPath) ?? parentDoc(docPath) ?? "" : ""
-            setUrlPath(parent || "", { cg: cgFlag })
+            const parent = docPath
+              ? parentCollection(docPath) ?? parentDoc(docPath) ?? ""
+              : ""
+            onNavigate(parent, tab.collectionGroup)
           }}
-          onNavigate={(p) => setUrlPath(p, { cg: cgFlag })}
+          onNavigate={(next) => onNavigate(next, tab.collectionGroup)}
         />
       </div>
-    </div>
+    </>
   )
+}
+
+function createTabId(): string {
+  return typeof crypto !== "undefined" && "randomUUID" in crypto
+    ? crypto.randomUUID()
+    : `tab-${Date.now()}-${Math.random().toString(36).slice(2)}`
 }
 
 interface CollectionViewProps {
@@ -166,12 +328,21 @@ function CollectionView({ collectionPath, cgFlag, docPath, onOpenDocument }: Col
   const [failedPaths, setFailedPaths] = useState<Set<string>>(new Set())
   const [newDocOpen, setNewDocOpen] = useState(false)
 
-  const browse = useDocuments(activeQuery ? undefined : collectionPath, {
+  const browse = useDocuments(collectionPath, {
     pageSize: PAGE_SIZE,
     pageToken: tokenStack[tokenStack.length - 1],
   })
   const queryRun = useRunQuery(activeQuery)
   const batch = useBatchCommit()
+
+  const fieldPaths = useMemo(
+    () =>
+      collectFieldPaths([
+        ...(browse.data?.documents ?? []),
+        ...(queryRun.data ?? []),
+      ]),
+    [browse.data?.documents, queryRun.data]
+  )
 
   const documents = activeQuery ? queryRun.data ?? [] : browse.data?.documents ?? []
   const isLoading = activeQuery ? queryRun.isLoading : browse.isLoading
@@ -205,6 +376,7 @@ function CollectionView({ collectionPath, cgFlag, docPath, onOpenDocument }: Col
       </div>
       <QueryBuilder
         state={queryState}
+        fieldPaths={fieldPaths}
         onChange={setQueryState}
         onRun={() => {
           setActiveQuery(queryState)

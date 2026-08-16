@@ -1,4 +1,5 @@
 import { Sidebar } from "@/components/layout/sidebar"
+import { ProjectAccessGuard } from "@/components/layout/project-access-guard"
 
 export default function DashboardLayout({
   children,
@@ -6,9 +7,11 @@ export default function DashboardLayout({
   children: React.ReactNode
 }) {
   return (
-    <div className="flex h-screen">
-      <Sidebar />
-      <main className="flex-1 overflow-hidden bg-muted/30">{children}</main>
-    </div>
+    <ProjectAccessGuard>
+      <div className="flex h-screen">
+        <Sidebar />
+        <main className="flex-1 overflow-hidden bg-muted/30">{children}</main>
+      </div>
+    </ProjectAccessGuard>
   )
 }

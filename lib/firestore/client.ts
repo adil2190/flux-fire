@@ -6,6 +6,7 @@ export interface FirestoreClientOptions {
   projectId: string
   databaseId?: string
   emulator?: { host: string; port: number }
+  onPermissionDenied?: () => void
 }
 
 export interface FirestoreClient {
@@ -68,7 +69,12 @@ export function createFirestoreClient(opts: FirestoreClientOptions): FirestoreCl
     const text = await res.text()
     const data = text ? safeJsonParse(text) : undefined
 
-    if (!res.ok) throw parseFirestoreError(res.status, data ?? text)
+    if (!res.ok) {
+      if (res.status === 403 && !opts.emulator) {
+        opts.onPermissionDenied?.()
+      }
+      throw parseFirestoreError(res.status, data ?? text)
+    }
 
     return data as T
   }

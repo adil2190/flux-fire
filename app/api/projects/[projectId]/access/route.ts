@@ -11,17 +11,22 @@ function json(body: unknown, status = 200) {
   })
 }
 
-export async function GET() {
+export async function GET(
+  request: Request,
+  { params }: { params: Promise<{ projectId: string }> }
+) {
   try {
     const session = await auth()
+    const { projectId } = await params
 
     if (!session?.accessToken) {
       return json({ error: "Unauthorized" }, 401)
     }
 
-    // Fetch Firebase projects using the Firebase Management API
     const response = await fetch(
-      "https://firebase.googleapis.com/v1beta1/projects",
+      `https://firebase.googleapis.com/v1beta1/projects/${encodeURIComponent(
+        projectId
+      )}`,
       {
         cache: "no-store",
         headers: {
@@ -30,23 +35,20 @@ export async function GET() {
       }
     )
 
-    if (!response.ok) {
-      const error = await response.text()
-      console.error("Firebase API error:", error)
-      return json({ error: "Failed to fetch projects" }, response.status)
+    if (response.status === 403 || response.status === 404) {
+      return json({ accessible: false })
     }
 
-    const data = await response.json()
-    const projects: FirebaseProject[] = data.results || []
+    if (!response.ok) {
+      const error = await response.text()
+      console.error("Firebase API error (project access):", error)
+      return json({ error: "Failed to verify project access" }, response.status)
+    }
 
-    // Filter to only active projects
-    const activeProjects = projects.filter(
-      (p) => p.state === "ACTIVE" || !p.state
-    )
-
-    return json({ projects: activeProjects })
+    const project: FirebaseProject = await response.json()
+    return json({ accessible: true, project })
   } catch (error) {
-    console.error("Error fetching projects:", error)
+    console.error("Error verifying project access:", error)
     return json({ error: "Internal server error" }, 500)
   }
 }

@@ -3,6 +3,7 @@
 import { SessionProvider } from "next-auth/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { Toaster } from "sonner"
+import { ThemeProvider, useTheme } from "next-themes"
 import { useState } from "react"
 import { TooltipProvider } from "@/components/ui/tooltip"
 
@@ -25,13 +26,34 @@ export function Providers({ children }: { children: React.ReactNode }) {
   )
 
   return (
-    <SessionProvider>
-      <QueryClientProvider client={queryClient}>
-        <TooltipProvider delayDuration={300}>
-          {children}
-          <Toaster position="bottom-right" richColors closeButton />
-        </TooltipProvider>
-      </QueryClientProvider>
-    </SessionProvider>
+    <ThemeProvider
+      attribute="class"
+      defaultTheme="system"
+      enableSystem
+      disableTransitionOnChange
+      storageKey="fluxfire-theme"
+    >
+      <SessionProvider>
+        <QueryClientProvider client={queryClient}>
+          <TooltipProvider delayDuration={300}>
+            {children}
+            <ThemedToaster />
+          </TooltipProvider>
+        </QueryClientProvider>
+      </SessionProvider>
+    </ThemeProvider>
+  )
+}
+
+function ThemedToaster() {
+  const { theme } = useTheme()
+
+  return (
+    <Toaster
+      position="bottom-right"
+      theme={theme === "light" || theme === "dark" ? theme : "system"}
+      richColors
+      closeButton
+    />
   )
 }

@@ -1,6 +1,7 @@
 "use client"
 
 import { Zap, Moon, Sun, Monitor } from "lucide-react"
+import { useTheme } from "next-themes"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -10,6 +11,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { useProjectStore } from "@/stores/project-store"
 
 export default function SettingsPage() {
+  const { theme, setTheme } = useTheme()
   const { useEmulator, emulatorPorts, toggleEmulator, setEmulatorPorts } =
     useProjectStore()
 
@@ -97,20 +99,32 @@ export default function SettingsPage() {
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="flex gap-2">
-              <Button variant="outline" size="sm" className="gap-2">
-                <Sun className="h-4 w-4" />
-                Light
-              </Button>
-              <Button variant="outline" size="sm" className="gap-2">
-                <Moon className="h-4 w-4" />
-                Dark
-              </Button>
-              <Button variant="outline" size="sm" className="gap-2">
-                <Monitor className="h-4 w-4" />
-                System
-              </Button>
+            <div
+              role="group"
+              aria-label="Color theme"
+              className="grid gap-2 sm:grid-cols-3"
+            >
+              {[
+                { value: "light", label: "Light", icon: Sun },
+                { value: "dark", label: "Dark", icon: Moon },
+                { value: "system", label: "System", icon: Monitor },
+              ].map(({ value, label, icon: Icon }) => (
+                <Button
+                  key={value}
+                  type="button"
+                  variant={theme === value ? "default" : "outline"}
+                  aria-pressed={theme === value}
+                  className="justify-start gap-2"
+                  onClick={() => setTheme(value)}
+                >
+                  <Icon className="h-4 w-4" />
+                  {label}
+                </Button>
+              ))}
             </div>
+            <p className="mt-3 text-xs text-muted-foreground">
+              System follows your device appearance and updates automatically.
+            </p>
           </CardContent>
         </Card>
       </div>

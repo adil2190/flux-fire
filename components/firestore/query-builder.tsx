@@ -15,6 +15,7 @@ import { Switch } from "@/components/ui/switch"
 import { Label } from "@/components/ui/label"
 import { Badge } from "@/components/ui/badge"
 import { FieldEditor } from "./field-editor"
+import { FieldPathCombobox } from "./field-path-combobox"
 import { isUnaryOp, inequalityFields } from "@/lib/firestore/queries"
 import { cn } from "@/lib/utils"
 import type { FilterOp, OrderBy, QueryFilter, QueryState } from "@/types/firestore"
@@ -25,6 +26,8 @@ interface Props {
   onRun: () => void
   onReset: () => void
   isRunning: boolean
+  layout?: "inline" | "stacked"
+  fieldPaths?: string[]
 }
 
 const ALL_OPS: { value: FilterOp; label: string }[] = [
@@ -44,7 +47,15 @@ const ALL_OPS: { value: FilterOp; label: string }[] = [
   { value: "is-not-nan", label: "is not nan" },
 ]
 
-export function QueryBuilder({ state, onChange, onRun, onReset, isRunning }: Props) {
+export function QueryBuilder({
+  state,
+  onChange,
+  onRun,
+  onReset,
+  isRunning,
+  layout = "inline",
+  fieldPaths,
+}: Props) {
   const [open, setOpen] = useState(true)
   const inequalities = inequalityFields(state.filters)
   const orderByMismatch =
@@ -115,6 +126,8 @@ export function QueryBuilder({ state, onChange, onRun, onReset, isRunning }: Pro
               <FilterRow
                 key={f.id}
                 filter={f}
+                layout={layout}
+                fieldPaths={fieldPaths}
                 onChange={(next) =>
                   onChange({
                     ...state,
@@ -156,6 +169,8 @@ export function QueryBuilder({ state, onChange, onRun, onReset, isRunning }: Pro
               <OrderByRow
                 key={idx}
                 orderBy={o}
+                layout={layout}
+                fieldPaths={fieldPaths}
                 onChange={(next) =>
                   onChange({
                     ...state,
@@ -214,24 +229,57 @@ interface FilterRowProps {
   filter: QueryFilter
   onChange: (next: QueryFilter) => void
   onRemove: () => void
+  layout: "inline" | "stacked"
+  fieldPaths?: string[]
 }
 
-function FilterRow({ filter, onChange, onRemove }: FilterRowProps) {
+function FilterRow({
+  filter,
+  onChange,
+  onRemove,
+  layout,
+  fieldPaths,
+}: FilterRowProps) {
   const unary = isUnaryOp(filter.op)
+  const stacked = layout === "stacked"
 
   return (
-    <div className="flex items-start gap-2">
-      <Input
-        placeholder="field.path"
-        className="h-8 w-48 font-mono text-xs"
-        value={filter.field}
-        onChange={(e) => onChange({ ...filter, field: e.target.value })}
-      />
+    <div
+      className={cn(
+        "gap-2",
+        stacked
+          ? "grid grid-cols-[minmax(0,1fr)_10rem_2rem] items-start"
+          : "flex items-start"
+      )}
+    >
+      {fieldPaths ? (
+        <FieldPathCombobox
+          value={filter.field}
+          options={fieldPaths}
+          onChange={(field) => onChange({ ...filter, field })}
+          className={stacked ? "col-start-1 row-start-1 w-full" : "w-48"}
+        />
+      ) : (
+        <Input
+          placeholder="field.path"
+          className={cn(
+            "h-8 font-mono text-xs",
+            stacked ? "col-start-1 row-start-1 w-full" : "w-48"
+          )}
+          value={filter.field}
+          onChange={(e) => onChange({ ...filter, field: e.target.value })}
+        />
+      )}
       <Select
         value={filter.op}
         onValueChange={(v) => onChange({ ...filter, op: v as FilterOp })}
       >
-        <SelectTrigger className="h-8 w-40 text-xs">
+        <SelectTrigger
+          className={cn(
+            "h-8 w-40 text-xs",
+            stacked && "col-start-2 row-start-1"
+          )}
+        >
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
@@ -242,7 +290,13 @@ function FilterRow({ filter, onChange, onRemove }: FilterRowProps) {
           ))}
         </SelectContent>
       </Select>
-      <div className={cn("flex-1", unary && "pointer-events-none opacity-40")}>
+      <div
+        className={cn(
+          "flex-1",
+          stacked && "col-span-3 col-start-1 row-start-2",
+          unary && "pointer-events-none opacity-40"
+        )}
+      >
         <FieldEditor
           value={filter.value}
           onChange={(v) => onChange({ ...filter, value: v })}
@@ -253,7 +307,10 @@ function FilterRow({ filter, onChange, onRemove }: FilterRowProps) {
         type="button"
         variant="ghost"
         size="icon"
-        className="h-8 w-8"
+        className={cn(
+          "h-8 w-8",
+          stacked && "col-start-3 row-start-1"
+        )}
         onClick={onRemove}
       >
         <Trash2 className="h-3.5 w-3.5" />
@@ -266,17 +323,44 @@ interface OrderByRowProps {
   orderBy: OrderBy
   onChange: (next: OrderBy) => void
   onRemove: () => void
+  layout: "inline" | "stacked"
+  fieldPaths?: string[]
 }
 
-function OrderByRow({ orderBy, onChange, onRemove }: OrderByRowProps) {
+function OrderByRow({
+  orderBy,
+  onChange,
+  onRemove,
+  layout,
+  fieldPaths,
+}: OrderByRowProps) {
+  const stacked = layout === "stacked"
+
   return (
-    <div className="flex items-center gap-2">
-      <Input
-        placeholder="field.path"
-        className="h-8 w-48 font-mono text-xs"
-        value={orderBy.field}
-        onChange={(e) => onChange({ ...orderBy, field: e.target.value })}
-      />
+    <div
+      className={cn(
+        "flex items-center gap-2",
+        stacked && "grid grid-cols-[minmax(0,1fr)_7rem_2rem]"
+      )}
+    >
+      {fieldPaths ? (
+        <FieldPathCombobox
+          value={orderBy.field}
+          options={fieldPaths}
+          onChange={(field) => onChange({ ...orderBy, field })}
+          className={stacked ? "w-full" : "w-48"}
+        />
+      ) : (
+        <Input
+          placeholder="field.path"
+          className={cn(
+            "h-8 font-mono text-xs",
+            stacked ? "w-full" : "w-48"
+          )}
+          value={orderBy.field}
+          onChange={(e) => onChange({ ...orderBy, field: e.target.value })}
+        />
+      )}
       <Select
         value={orderBy.dir}
         onValueChange={(v) => onChange({ ...orderBy, dir: v as "asc" | "desc" })}

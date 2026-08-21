@@ -48,6 +48,7 @@
 
 /* Orange Firebase Theme - Light Mode */
 :root {
+  color-scheme: light;
   --radius: 0.625rem;
   --background: hsl(0 0% 100%);
   --foreground: hsl(20 14.3% 4.1%);
@@ -84,6 +85,7 @@
 
 /* Orange Firebase Theme - Dark Mode */
 .dark {
+  color-scheme: dark;
   --background: hsl(20 14.3% 4.1%);
   --foreground: hsl(60 9.1% 97.8%);
   --card: hsl(20 14.3% 4.1%);

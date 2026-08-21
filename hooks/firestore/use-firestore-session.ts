@@ -2,6 +2,7 @@
 
 import { useMemo } from "react"
 import { useSession } from "next-auth/react"
+import { useQueryClient } from "@tanstack/react-query"
 import { useProjectStore } from "@/stores/project-store"
 import { createFirestoreClient, type FirestoreClient } from "@/lib/firestore/client"
 
@@ -15,6 +16,7 @@ interface FirestoreSession {
 
 export function useFirestoreSession(): FirestoreSession {
   const { data: session, status } = useSession()
+  const qc = useQueryClient()
   const selectedProject = useProjectStore((s) => s.selectedProject)
   const useEmulator = useProjectStore((s) => s.useEmulator)
   const emulatorPorts = useProjectStore((s) => s.emulatorPorts)
@@ -38,6 +40,11 @@ export function useFirestoreSession(): FirestoreSession {
       emulator: useEmulator
         ? { host: "localhost", port: emulatorPorts.firestore }
         : undefined,
+      onPermissionDenied: () => {
+        void qc.invalidateQueries({
+          queryKey: ["firebase-project-access", selectedProject.projectId],
+        })
+      },
     })
 
     return {
@@ -46,5 +53,12 @@ export function useFirestoreSession(): FirestoreSession {
       projectId: selectedProject.projectId,
       scopeError: false,
     }
-  }, [session, status, selectedProject, useEmulator, emulatorPorts.firestore])
+  }, [
+    session,
+    status,
+    selectedProject,
+    useEmulator,
+    emulatorPorts.firestore,
+    qc,
+  ])
 }

@@ -3,6 +3,7 @@
 import Link from "next/link"
 import { usePathname, useRouter } from "next/navigation"
 import { signOut, useSession } from "next-auth/react"
+import { useQueryClient } from "@tanstack/react-query"
 import {
   Database,
   Users,
@@ -39,16 +40,32 @@ const NAV_ITEMS = [
 export function Sidebar() {
   const pathname = usePathname()
   const router = useRouter()
+  const qc = useQueryClient()
   const { data: session } = useSession()
   const { selectedProject, useEmulator, toggleEmulator, disconnect } =
     useProjectStore()
 
   const handleDisconnect = () => {
+    if (selectedProject) {
+      qc.removeQueries({
+        queryKey: ["firestore", selectedProject.projectId],
+      })
+      qc.removeQueries({
+        queryKey: ["firebase-config", selectedProject.projectId],
+      })
+      qc.removeQueries({
+        queryKey: ["firebase-project-access", selectedProject.projectId],
+      })
+    }
     disconnect()
     router.push("/projects")
   }
 
   const handleSignOut = () => {
+    qc.removeQueries({ queryKey: ["firestore"] })
+    qc.removeQueries({ queryKey: ["firebase-config"] })
+    qc.removeQueries({ queryKey: ["firebase-project-access"] })
+    qc.removeQueries({ queryKey: ["firebase-projects"] })
     disconnect()
     signOut({ callbackUrl: "/login" })
   }

@@ -20,6 +20,7 @@ import {
   FirestoreTabsBar,
   type FirestoreTab,
 } from "@/components/firestore/firestore-tabs-bar"
+import { ColumnResizeHandle } from "@/components/firestore/column-resize-handle"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import {
@@ -75,6 +76,9 @@ function FirestorePageContent() {
   const [tabs, setTabs] = useState<FirestoreTab[]>(() => [
     { id: "initial", path, collectionGroup: cgFlag },
   ])
+  const [collectionsWidth, setCollectionsWidth] = useState(260)
+  const [collectionsCollapsed, setCollectionsCollapsed] = useState(false)
+  const [inspectorWidth, setInspectorWidth] = useState(420)
   const [fallbackActiveTabId, setFallbackActiveTabId] = useState("initial")
   const urlTabId = searchParams.get("tab")
   const urlOwnerTabId = urlTabId
@@ -202,11 +206,20 @@ function FirestorePageContent() {
     )
   }
 
+  const effectiveCollectionsWidth = collectionsCollapsed ? 52 : collectionsWidth
+
   return (
-    <div className="grid h-full grid-cols-[260px_minmax(0,1fr)_420px] grid-rows-[36px_minmax(0,1fr)] overflow-hidden bg-card">
-      <div className="col-start-1 row-span-2 min-h-0 overflow-hidden border-r">
+    <div
+      className="grid h-full grid-rows-[36px_minmax(0,1fr)] overflow-hidden bg-card"
+      style={{
+        gridTemplateColumns: `${effectiveCollectionsWidth}px ${collectionsCollapsed ? 0 : 8}px minmax(320px, 1fr) 8px ${inspectorWidth}px`,
+      }}
+    >
+      <div className="col-start-1 row-span-2 min-h-0 overflow-hidden">
         <CollectionsTree
           selectedPath={path}
+          collapsed={collectionsCollapsed}
+          onToggleCollapsed={() => setCollectionsCollapsed((value) => !value)}
           onSelect={(next) => {
             if (isCollectionPath(next)) openCollectionTab(next)
             else setUrlPath(next)
@@ -214,7 +227,19 @@ function FirestorePageContent() {
         />
       </div>
 
-      <div className="col-span-2 col-start-2 row-start-1 min-w-0">
+      {!collectionsCollapsed && (
+        <ColumnResizeHandle
+          label="collections"
+          value={collectionsWidth}
+          min={180}
+          max={480}
+          edge="left"
+          className="col-start-2 row-span-2 row-start-1"
+          onChange={setCollectionsWidth}
+        />
+      )}
+
+      <div className="col-span-3 col-start-3 row-start-1 min-w-0">
         <FirestoreTabsBar
           tabs={visibleTabs}
           activeTabId={activeTabId}
@@ -223,6 +248,16 @@ function FirestorePageContent() {
           onAdd={addTab}
         />
       </div>
+
+      <ColumnResizeHandle
+        label="document inspector"
+        value={inspectorWidth}
+        min={280}
+        max={640}
+        edge="right"
+        className="col-start-4 row-start-2"
+        onChange={setInspectorWidth}
+      />
 
       {visibleTabs.map((tab) => (
         <FirestoreWorkspace
@@ -264,7 +299,7 @@ function FirestoreWorkspace({
         role="tabpanel"
         aria-labelledby={`firestore-tab-${tab.id}`}
         hidden={!active}
-        className="col-start-2 row-start-2 flex min-h-0 flex-col overflow-hidden"
+        className="col-start-3 row-start-2 flex min-h-0 flex-col overflow-hidden"
       >
         {collectionPath ? (
           <CollectionView
@@ -288,7 +323,7 @@ function FirestoreWorkspace({
 
       <div
         hidden={!active}
-        className="col-start-3 row-start-2 min-h-0 overflow-hidden border-l"
+        className="col-start-5 row-start-2 min-h-0 overflow-hidden border-l"
       >
         <DocumentInspector
           docPath={docPath}

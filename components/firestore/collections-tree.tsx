@@ -1,6 +1,14 @@
 "use client"
 
-import { ChevronRight, Database, Folder, FileText, Loader2 } from "lucide-react"
+import {
+  ChevronRight,
+  Database,
+  Folder,
+  FileText,
+  Loader2,
+  PanelLeftClose,
+  PanelLeftOpen,
+} from "lucide-react"
 import { useState } from "react"
 import { useCollectionIds } from "@/hooks/firestore/use-collection-ids"
 import { useDocuments } from "@/hooks/firestore/use-documents"
@@ -11,16 +19,52 @@ import { joinPath } from "@/lib/firestore/paths"
 interface Props {
   selectedPath: string
   onSelect: (path: string) => void
+  collapsed: boolean
+  onToggleCollapsed: () => void
 }
 
-export function CollectionsTree({ selectedPath, onSelect }: Props) {
+export function CollectionsTree({
+  selectedPath,
+  onSelect,
+  collapsed,
+  onToggleCollapsed,
+}: Props) {
   const { data: rootCollections, isLoading, error } = useCollectionIds(undefined)
 
+  if (collapsed) {
+    return (
+      <div className="flex h-full flex-col items-center border-r py-2">
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-9 w-9"
+          aria-label="Expand collections sidebar"
+          title="Expand collections sidebar"
+          onClick={onToggleCollapsed}
+        >
+          <PanelLeftOpen className="h-4 w-4" />
+        </Button>
+        <Database className="mt-2 h-4 w-4 text-muted-foreground" />
+        <span className="sr-only">Collections</span>
+      </div>
+    )
+  }
+
   return (
-    <div className="flex h-full flex-col">
-      <div className="flex items-center gap-2 border-b px-4 py-3">
-        <Database className="h-4 w-4 text-muted-foreground" />
-        <span className="text-sm font-medium">Collections</span>
+    <div className="flex h-full flex-col border-r">
+      <div className="flex items-center gap-2 border-b px-3 py-2">
+        <Database className="h-4 w-4 shrink-0 text-muted-foreground" />
+        <span className="min-w-0 flex-1 truncate text-sm font-medium">Collections</span>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-7 w-7 shrink-0"
+          aria-label="Collapse collections sidebar"
+          title="Collapse collections sidebar"
+          onClick={onToggleCollapsed}
+        >
+          <PanelLeftClose className="h-4 w-4" />
+        </Button>
       </div>
       <div className="flex-1 overflow-auto">
         <div className="p-1">

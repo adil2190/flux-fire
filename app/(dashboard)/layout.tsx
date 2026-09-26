@@ -10,7 +10,7 @@ export default function DashboardLayout({
     <ProjectAccessGuard>
       <div className="flex h-screen">
         <Sidebar />
-        <main className="flex-1 overflow-hidden bg-muted/30">{children}</main>
+        <main className="min-w-0 flex-1 overflow-hidden bg-muted/30">{children}</main>
       </div>
     </ProjectAccessGuard>
   )

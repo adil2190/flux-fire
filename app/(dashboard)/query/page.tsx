@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useMemo, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import {
   Braces,
@@ -49,12 +49,26 @@ export default function QueryPage() {
   const [activeQuery, setActiveQuery] = useState<QueryState | null>(null)
   const [selection, setSelection] = useState<Set<string>>(new Set())
   const [selectedDocPath, setSelectedDocPath] = useState<string | null>(null)
+  const [showValidation, setShowValidation] = useState(false)
+  const targetInputRef = useRef<HTMLInputElement>(null)
+  const resultsRef = useRef<HTMLElement>(null)
+  // Where focus returns when the inspector sheet closes.
+  const sheetOpenerRef = useRef<HTMLElement | null>(null)
+  const deletedInSheetRef = useRef(false)
 
   const queryRun = useRunQuery(activeQuery)
   const documents = useMemo(() => queryRun.data ?? [], [queryRun.data])
   const error = queryRun.error
   const firestoreError = error instanceof FirestoreError ? error : null
   const validationError = validateQuery(target, draft)
+  const targetError =
+    showValidation && validationError?.field === "target"
+      ? validationError.message
+      : null
+  const queryError =
+    showValidation && validationError?.field === "query"
+      ? validationError.message
+      : null
   const requestPreview = useMemo(
     () => JSON.stringify(buildStructuredQuery(draft), null, 2),
     [draft]
@@ -82,9 +96,11 @@ export default function QueryPage() {
 
   const runQuery = () => {
     if (validationError) {
-      toast.error(validationError)
+      setShowValidation(true)
+      if (validationError.field === "target") targetInputRef.current?.focus()
       return
     }
+    setShowValidation(false)
 
     const next = cloneQueryState(draft)
     setSelection(new Set())
@@ -107,6 +123,7 @@ export default function QueryPage() {
     setActiveQuery(null)
     setSelection(new Set())
     setSelectedDocPath(null)
+    setShowValidation(false)
   }
 
   const downloadResults = (format: "json" | "csv") => {
@@ -174,7 +191,7 @@ export default function QueryPage() {
         </div>
       </header>
 
-      <div className="grid min-h-0 flex-1 grid-cols-[440px_minmax(0,1fr)] overflow-hidden">
+      <div className="grid min-h-0 flex-1 grid-cols-[min(440px,50%)_minmax(0,1fr)] overflow-hidden">
         <aside className="min-h-0 overflow-y-auto border-r bg-muted/10">
           <section className="space-y-2 border-b bg-card p-4">
             <div className="flex items-center justify-between gap-3">
@@ -182,14 +199,17 @@ export default function QueryPage() {
                 Collection path
               </Label>
               {draft.parentDoc && (
-                <Badge variant="secondary" className="font-mono text-[10px]">
+                <Badge variant="secondary" className="font-mono text-2xs">
                   parent: {draft.parentDoc}
                 </Badge>
               )}
             </div>
             <Input
               id="query-target"
+              ref={targetInputRef}
               data-testid="query-target"
+              aria-invalid={!!targetError}
+              aria-describedby={targetError ? "query-target-error" : "query-target-hint"}
               value={target}
               onChange={(event) => updateTarget(event.target.value)}
               onKeyDown={(event) => {
@@ -199,24 +219,30 @@ export default function QueryPage() {
               className="font-mono text-sm"
               autoComplete="off"
             />
-            <div className="flex items-start justify-between gap-3">
-              <p className="text-[11px] leading-4 text-muted-foreground">
-                Enter a root collection or a full subcollection path.
+            {targetError ? (
+              <p id="query-target-error" className="text-xs text-destructive">
+                {targetError}
               </p>
-              {target && (
-                <span
-                  className={
-                    validationError?.startsWith("Collection path")
-                      ? "text-[11px] text-destructive"
-                      : "text-[11px] text-emerald-600"
-                  }
-                >
-                  {validationError?.startsWith("Collection path")
-                    ? "Invalid path"
-                    : "Valid target"}
-                </span>
-              )}
-            </div>
+            ) : (
+              <div className="flex items-start justify-between gap-3">
+                <p id="query-target-hint" className="text-2xs leading-4 text-muted-foreground">
+                  Enter a root collection or a full subcollection path.
+                </p>
+                {target && (
+                  <span
+                    className={
+                      validationError?.field === "target"
+                        ? "text-2xs text-destructive"
+                        : "text-2xs text-emerald-700 dark:text-emerald-400"
+                    }
+                  >
+                    {validationError?.field === "target"
+                      ? "Invalid path"
+                      : "Valid target"}
+                  </span>
+                )}
+              </div>
+            )}
           </section>
 
           <QueryBuilder
@@ -227,6 +253,11 @@ export default function QueryPage() {
             isRunning={queryRun.isFetching}
             layout="stacked"
           />
+          {queryError && (
+            <p role="alert" className="border-b bg-card px-4 py-2 text-xs text-destructive">
+              {queryError}
+            </p>
+          )}
 
           <details className="group border-b bg-card">
             <summary className="flex cursor-pointer list-none items-center justify-between px-4 py-3 text-xs font-medium hover:bg-accent/50">
@@ -234,13 +265,13 @@ export default function QueryPage() {
                 <Braces className="h-3.5 w-3.5 text-muted-foreground" />
                 REST request preview
               </span>
-              <Badge variant="outline" className="font-mono text-[10px]">
+              <Badge variant="outline" className="font-mono text-2xs">
                 POST
               </Badge>
             </summary>
             <div className="border-t bg-zinc-950 p-3 text-zinc-100">
               <div className="mb-2 flex items-start justify-between gap-2">
-                <code className="break-all font-mono text-[10px] text-zinc-400">
+                <code className="break-all font-mono text-2xs text-zinc-400">
                   {requestPath}
                 </code>
                 <Button
@@ -257,39 +288,45 @@ export default function QueryPage() {
                   <Copy className="h-3.5 w-3.5" />
                 </Button>
               </div>
-              <pre className="overflow-x-auto whitespace-pre-wrap font-mono text-[10px] leading-4">
+              <pre className="overflow-x-auto whitespace-pre-wrap font-mono text-2xs leading-4">
                 {requestPreview}
               </pre>
             </div>
           </details>
         </aside>
 
-        <main className="flex min-h-0 flex-col overflow-hidden">
+        <section
+          ref={resultsRef}
+          tabIndex={-1}
+          aria-label="Query results"
+          className="flex min-h-0 flex-col overflow-hidden outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+        >
           <div className="flex h-12 shrink-0 items-center justify-between border-b px-4">
             <div className="flex items-center gap-2">
               <FileSearch className="h-4 w-4 text-muted-foreground" />
               <span className="text-sm font-medium">Results</span>
               {activeQuery && (
-                <Badge variant="secondary" className="font-mono text-[10px]">
+                <Badge variant="secondary" className="font-mono text-2xs">
                   {activeQuery.allDescendants
                     ? `collectionGroup(${activeQuery.collectionId})`
                     : targetLabel(activeQuery)}
                 </Badge>
               )}
               {queryRun.isFetching ? (
-                <Badge variant="outline" className="gap-1 text-[10px]">
+                <Badge variant="outline" className="gap-1 text-2xs">
                   <Loader2 className="h-3 w-3 animate-spin" /> Running
                 </Badge>
               ) : activeQuery && !queryRun.error ? (
-                <Badge variant="outline" className="gap-1 text-[10px] text-emerald-700">
-                  <CheckCircle2 className="h-3 w-3" /> {documents.length} found
+                <Badge variant="outline" className="gap-1 text-2xs text-emerald-700 dark:text-emerald-400">
+                  <CheckCircle2 className="h-3 w-3" />
+                  <span className="tabular-nums">{documents.length} found</span>
                 </Badge>
               ) : null}
             </div>
 
             <div className="flex items-center gap-1">
               {selection.size > 0 && (
-                <Badge variant="secondary" className="mr-1 text-[10px]">
+                <Badge variant="secondary" className="mr-1 text-2xs tabular-nums">
                   {selection.size} selected
                 </Badge>
               )}
@@ -309,7 +346,7 @@ export default function QueryPage() {
                   )
                 }}
               >
-                <Copy className="h-3.5 w-3.5" /> IDs
+                <Copy className="h-3.5 w-3.5" /> Copy IDs
               </Button>
               <Button
                 variant="ghost"
@@ -318,7 +355,7 @@ export default function QueryPage() {
                 disabled={exportDocuments.length === 0}
                 onClick={() => downloadResults("json")}
               >
-                <Download className="h-3.5 w-3.5" /> JSON
+                <Download className="h-3.5 w-3.5" /> Export JSON
               </Button>
               <Button
                 variant="ghost"
@@ -327,7 +364,7 @@ export default function QueryPage() {
                 disabled={exportDocuments.length === 0}
                 onClick={() => downloadResults("csv")}
               >
-                <Download className="h-3.5 w-3.5" /> CSV
+                <Download className="h-3.5 w-3.5" /> Export CSV
               </Button>
             </div>
           </div>
@@ -381,11 +418,18 @@ export default function QueryPage() {
               selectedId={selectedDocPath}
               selection={selection}
               onSelectionChange={setSelection}
-              onOpenDocument={setSelectedDocPath}
+              onOpenDocument={(path) => {
+                sheetOpenerRef.current =
+                  document.activeElement instanceof HTMLElement &&
+                  document.activeElement !== document.body
+                    ? document.activeElement
+                    : null
+                setSelectedDocPath(path)
+              }}
               showPathColumn={activeQuery.allDescendants}
             />
           )}
-        </main>
+        </section>
       </div>
 
       <Sheet
@@ -398,6 +442,16 @@ export default function QueryPage() {
           side="right"
           showCloseButton={false}
           className="w-full gap-0 p-0 sm:max-w-[480px]"
+          onCloseAutoFocus={(event) => {
+            // Return to the row that opened the sheet, unless that document
+            // was just deleted (its row is about to disappear).
+            event.preventDefault()
+            const opener = sheetOpenerRef.current
+            if (!deletedInSheetRef.current && opener?.isConnected) opener.focus()
+            else resultsRef.current?.focus()
+            deletedInSheetRef.current = false
+            sheetOpenerRef.current = null
+          }}
         >
           <SheetHeader className="sr-only">
             <SheetTitle>Document inspector</SheetTitle>
@@ -409,6 +463,9 @@ export default function QueryPage() {
             <DocumentInspector
               docPath={selectedDocPath}
               onClose={() => setSelectedDocPath(null)}
+              onDeleted={() => {
+                deletedInSheetRef.current = true
+              }}
               onNavigate={(path) => {
                 const params = new URLSearchParams({ path })
                 setSelectedDocPath(null)
@@ -432,16 +489,27 @@ function emptyQueryState(): QueryState {
   }
 }
 
-function validateQuery(target: string, query: QueryState): string | null {
-  if (!target.trim()) return "Enter a collection path before running the query."
+interface ValidationError {
+  field: "target" | "query"
+  message: string
+}
+
+function validateQuery(target: string, query: QueryState): ValidationError | null {
+  if (!target.trim()) {
+    return { field: "target", message: "Enter a collection path, like users." }
+  }
   if (!isCollectionPath(target)) {
-    return "Collection path must contain an odd number of segments."
+    return {
+      field: "target",
+      message:
+        "Use a collection path with an odd number of segments, like users or users/alice/orders.",
+    }
   }
   if (query.filters.some((filter) => !filter.field.trim())) {
-    return "Every filter needs a field path."
+    return { field: "query", message: "Choose a field for every filter, or remove the empty filter." }
   }
   if (query.orderBy.some((order) => !order.field.trim())) {
-    return "Every order clause needs a field path."
+    return { field: "query", message: "Choose a field for every ordering, or remove the empty one." }
   }
   return null
 }

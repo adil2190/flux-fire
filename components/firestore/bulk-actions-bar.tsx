@@ -26,10 +26,16 @@ export function BulkActionsBar({
   return (
     <div className="flex items-center justify-between border-t bg-card px-4 py-2 text-xs">
       <div className="flex items-center gap-2">
-        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={onClear}>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-7 w-7"
+          aria-label="Clear selection"
+          onClick={onClear}
+        >
           <X className="h-3.5 w-3.5" />
         </Button>
-        <span className="font-medium">
+        <span className="font-medium tabular-nums">
           {count} selected
         </span>
       </div>
@@ -50,7 +56,7 @@ export function BulkActionsBar({
           onClick={onExportJson}
           disabled={busy}
         >
-          <Download className="h-3.5 w-3.5" /> JSON
+          <Download className="h-3.5 w-3.5" /> Export JSON
         </Button>
         <Button
           variant="ghost"
@@ -59,7 +65,7 @@ export function BulkActionsBar({
           onClick={onExportCsv}
           disabled={busy}
         >
-          <Download className="h-3.5 w-3.5" /> CSV
+          <Download className="h-3.5 w-3.5" /> Export CSV
         </Button>
         <Button
           variant="ghost"

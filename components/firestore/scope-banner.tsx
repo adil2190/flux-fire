@@ -1,9 +1,10 @@
 "use client"
 
-import { ShieldAlert, ExternalLink } from "lucide-react"
+import { Info, ShieldAlert, ExternalLink } from "lucide-react"
 import { signIn } from "next-auth/react"
 import { Button } from "@/components/ui/button"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
+import { useProjectStore } from "@/stores/project-store"
 
 interface Props {
   message?: string
@@ -12,10 +13,12 @@ interface Props {
 }
 
 export function ScopeBanner({ message, indexUrl, variant = "scope" }: Props) {
+  const projectId = useProjectStore((s) => s.selectedProject?.projectId)
+
   if (variant === "index" && indexUrl) {
     return (
       <Alert>
-        <ShieldAlert className="h-4 w-4" />
+        <Info className="h-4 w-4" />
         <AlertTitle>This query needs a composite index</AlertTitle>
         <AlertDescription className="space-y-2">
           <p className="text-xs">
@@ -37,6 +40,12 @@ export function ScopeBanner({ message, indexUrl, variant = "scope" }: Props) {
   }
 
   if (variant === "permission") {
+    // PERMISSION_DENIED usually means a missing IAM role, which signing in
+    // again can't fix; lead with the IAM page and keep sign-in as a fallback
+    // for sessions that predate the Datastore scope.
+    const iamUrl = projectId
+      ? `https://console.cloud.google.com/iam-admin/iam?project=${encodeURIComponent(projectId)}`
+      : "https://console.cloud.google.com/iam-admin/iam"
     return (
       <Alert variant="destructive">
         <ShieldAlert className="h-4 w-4" />
@@ -44,16 +53,32 @@ export function ScopeBanner({ message, indexUrl, variant = "scope" }: Props) {
         <AlertDescription className="space-y-2">
           <p className="text-xs">
             {message ||
-              "Your Google account lacks the required IAM role on this project (need roles/datastore.user or higher)."}
+              "Your Google account needs the Cloud Datastore User role (roles/datastore.user) or higher on this project."}
           </p>
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-7 gap-1 text-xs"
-            onClick={() => signIn("google", { callbackUrl: window.location.href })}
-          >
-            Re-authenticate
-          </Button>
+          <p className="text-xs">
+            Ask a project owner to grant the role in IAM. If you already have
+            it, sign in again to refresh Fluxfire’s access.
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              asChild
+              variant="outline"
+              size="sm"
+              className="h-7 gap-1 text-xs"
+            >
+              <a href={iamUrl} target="_blank" rel="noopener noreferrer">
+                Open IAM settings <ExternalLink className="h-3.5 w-3.5" />
+              </a>
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 text-xs"
+              onClick={() => signIn("google", { callbackUrl: window.location.href })}
+            >
+              Sign in again
+            </Button>
+          </div>
         </AlertDescription>
       </Alert>
     )
@@ -74,7 +99,7 @@ export function ScopeBanner({ message, indexUrl, variant = "scope" }: Props) {
           className="h-7 gap-1 text-xs"
           onClick={() => signIn("google", { callbackUrl: window.location.href })}
         >
-          Re-authenticate
+          Sign in again
         </Button>
       </AlertDescription>
     </Alert>

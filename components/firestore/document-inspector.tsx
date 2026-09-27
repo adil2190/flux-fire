@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useId, useMemo, useState } from "react"
 import { Loader2, Save, Trash2, X, Plus, ChevronRight } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -9,35 +9,42 @@ import { Badge } from "@/components/ui/badge"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { toast } from "sonner"
 import { FieldEditor, defaultFieldValue } from "./field-editor"
+import { ConfirmDialog } from "./confirm-dialog"
 import { useDocument } from "@/hooks/firestore/use-document"
 import { useCollectionIds } from "@/hooks/firestore/use-collection-ids"
 import { useWriteDocument } from "@/hooks/firestore/use-write-document"
 import { useDeleteDocument } from "@/hooks/firestore/use-delete-document"
 import { fieldValueToPlain } from "@/lib/firestore/encoding"
 import { cn } from "@/lib/utils"
-import type { FieldValue } from "@/types/firestore"
+import { useProjectStore } from "@/stores/project-store"
+import type { FieldValue, FirestoreDocument } from "@/types/firestore"
 import { FirestoreError } from "@/lib/firestore/errors"
 
 interface Props {
   docPath: string | null
   onClose: () => void
   onNavigate: (path: string) => void
+  /** Called after a successful delete, just before onClose. */
+  onDeleted?: () => void
 }
 
-export function DocumentInspector({ docPath, onClose, onNavigate }: Props) {
+interface DraftState {
+  draft: Record<string, FieldValue>
+  dirty: string[]
+  baseUpdateTime?: string
+}
+
+// Unsaved edits survive switching documents or closing the inspector, keyed by
+// project + document path. Entries are dropped on save, discard, or delete.
+const draftCache = new Map<string, DraftState>()
+
+function freshDraft(doc: FirestoreDocument): DraftState {
+  return { draft: doc.fields, dirty: [], baseUpdateTime: doc.updateTime }
+}
+
+export function DocumentInspector({ docPath, onClose, onNavigate, onDeleted }: Props) {
   const { data: doc, isLoading, error } = useDocument(docPath ?? undefined)
-  const writeDoc = useWriteDocument()
-  const deleteDoc = useDeleteDocument()
-
-  const [draft, setDraft] = useState<Record<string, FieldValue>>({})
-  const [dirty, setDirty] = useState<Set<string>>(new Set())
-
-  useEffect(() => {
-    setDraft(doc?.fields ?? {})
-    setDirty(new Set())
-  }, [doc?.path, doc?.updateTime, doc?.fields])
-
-  const fieldNames = useMemo(() => Object.keys(draft).sort(), [draft])
+  const projectId = useProjectStore((s) => s.selectedProject?.projectId)
 
   if (!docPath) {
     return (
@@ -61,14 +68,74 @@ export function DocumentInspector({ docPath, onClose, onNavigate }: Props) {
         <InspectorHeader path={docPath} onClose={onClose} dirty={false} />
         <Alert variant="destructive" className="m-3">
           <AlertDescription>
-            {error instanceof FirestoreError ? error.message : "Failed to load document"}
+            {error instanceof FirestoreError ? error.message : "Unable to load this document. Try again."}
           </AlertDescription>
         </Alert>
       </div>
     )
   }
 
+  return (
+    <DocumentEditor
+      key={doc.path}
+      doc={doc}
+      cacheKey={`${projectId}/${doc.path}`}
+      onClose={onClose}
+      onNavigate={onNavigate}
+      onDeleted={onDeleted}
+    />
+  )
+}
+
+interface DocumentEditorProps {
+  doc: FirestoreDocument
+  cacheKey: string
+  onClose: () => void
+  onNavigate: (path: string) => void
+  onDeleted?: () => void
+}
+
+function DocumentEditor({ doc, cacheKey, onClose, onNavigate, onDeleted }: DocumentEditorProps) {
+  const writeDoc = useWriteDocument()
+  const deleteDoc = useDeleteDocument()
+  const [state, setState] = useState<DraftState>(
+    () => draftCache.get(cacheKey) ?? freshDraft(doc)
+  )
+  const [confirmDelete, setConfirmDelete] = useState(false)
+  const { draft } = state
+  const dirty = useMemo(() => new Set(state.dirty), [state.dirty])
   const isDirty = dirty.size > 0
+
+  // Pick up server changes (after a save, or someone else's write) only while
+  // there are no local edits, so a refetch never wipes unsaved work.
+  if (!isDirty && state.baseUpdateTime !== doc.updateTime) {
+    setState(freshDraft(doc))
+  }
+
+  useEffect(() => {
+    if (!isDirty) return
+    const warn = (event: BeforeUnloadEvent) => event.preventDefault()
+    window.addEventListener("beforeunload", warn)
+    return () => window.removeEventListener("beforeunload", warn)
+  }, [isDirty])
+
+  const fieldNames = useMemo(() => Object.keys(draft).sort(), [draft])
+
+  const update = (nextDraft: Record<string, FieldValue>, nextDirty: Set<string>) => {
+    const next = {
+      draft: nextDraft,
+      dirty: Array.from(nextDirty),
+      baseUpdateTime: state.baseUpdateTime,
+    }
+    setState(next)
+    if (next.dirty.length > 0) draftCache.set(cacheKey, next)
+    else draftCache.delete(cacheKey)
+  }
+
+  const discard = () => {
+    draftCache.delete(cacheKey)
+    setState(freshDraft(doc))
+  }
 
   const save = async () => {
     try {
@@ -78,21 +145,29 @@ export function DocumentInspector({ docPath, onClose, onNavigate }: Props) {
         mode: "patch",
         updateMask: Array.from(dirty),
       })
-      toast.success("Saved")
-      setDirty(new Set())
+      toast.success("Changes saved")
+      update(draft, new Set())
     } catch (err) {
-      toast.error(err instanceof FirestoreError ? err.message : "Save failed")
+      toast.error(
+        err instanceof FirestoreError ? err.message : "Unable to save changes. Try again.",
+        { duration: Infinity }
+      )
     }
   }
 
   const remove = async () => {
-    if (!confirm(`Delete ${doc.path}?`)) return
     try {
       await deleteDoc.mutateAsync({ path: doc.path })
-      toast.success("Deleted")
+      draftCache.delete(cacheKey)
+      setConfirmDelete(false)
+      toast.success("Document deleted")
+      onDeleted?.()
       onClose()
     } catch (err) {
-      toast.error(err instanceof FirestoreError ? err.message : "Delete failed")
+      toast.error(
+        err instanceof FirestoreError ? err.message : "Unable to delete the document. Try again.",
+        { duration: Infinity }
+      )
     }
   }
 
@@ -115,28 +190,22 @@ export function DocumentInspector({ docPath, onClose, onNavigate }: Props) {
                   value={draft[name]}
                   dirty={dirty.has(name)}
                   onChange={(next) => {
-                    setDraft({ ...draft, [name]: next })
-                    setDirty(new Set([...dirty, name]))
+                    update({ ...draft, [name]: next }, new Set([...dirty, name]))
                   }}
                   onRename={(newName) => {
-                    if (!newName || newName === name) return
+                    if (newName === name) return null
+                    if (!newName) return "Enter a field name."
                     if (newName in draft) {
-                      toast.error("Field already exists")
-                      return
+                      return `A field named “${newName}” already exists. Choose another name.`
                     }
                     const { [name]: val, ...rest } = draft
-                    setDraft({ ...rest, [newName]: val })
-                    const newDirty = new Set(dirty)
-                    newDirty.delete(name)
-                    newDirty.add(name)
-                    newDirty.add(newName)
-                    setDirty(newDirty)
+                    update({ ...rest, [newName]: val }, new Set([...dirty, name, newName]))
+                    return null
                   }}
                   onDelete={() => {
                     const rest = { ...draft }
                     delete rest[name]
-                    setDraft(rest)
-                    setDirty(new Set([...dirty, name]))
+                    update(rest, new Set([...dirty, name]))
                   }}
                 />
               ))}
@@ -148,8 +217,10 @@ export function DocumentInspector({ docPath, onClose, onNavigate }: Props) {
                   let i = 1
                   let name = "newField"
                   while (name in draft) name = `newField${i++}`
-                  setDraft({ ...draft, [name]: defaultFieldValue("string") })
-                  setDirty(new Set([...dirty, name]))
+                  update(
+                    { ...draft, [name]: defaultFieldValue("string") },
+                    new Set([...dirty, name])
+                  )
                 }}
               >
                 <Plus className="h-3.5 w-3.5" /> Add field
@@ -162,7 +233,7 @@ export function DocumentInspector({ docPath, onClose, onNavigate }: Props) {
         </TabsContent>
 
         <TabsContent value="raw" className="flex-1 overflow-auto">
-          <pre className="p-3 font-mono text-[11px]">
+          <pre className="p-3 font-mono text-2xs">
             {JSON.stringify(plainFields(draft), null, 2)}
           </pre>
         </TabsContent>
@@ -173,20 +244,48 @@ export function DocumentInspector({ docPath, onClose, onNavigate }: Props) {
           variant="ghost"
           size="sm"
           className="h-8 gap-1 text-xs text-destructive hover:text-destructive"
-          onClick={remove}
+          onClick={() => setConfirmDelete(true)}
           disabled={deleteDoc.isPending}
         >
           <Trash2 className="h-3.5 w-3.5" /> Delete
         </Button>
-        <Button
-          size="sm"
-          className="h-8 gap-1 text-xs"
-          onClick={save}
-          disabled={!isDirty || writeDoc.isPending}
-        >
-          <Save className="h-3.5 w-3.5" /> Save
-        </Button>
+        <div className="flex items-center gap-2">
+          {isDirty && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-8 text-xs"
+              onClick={discard}
+              disabled={writeDoc.isPending}
+            >
+              Discard changes
+            </Button>
+          )}
+          <Button
+            size="sm"
+            className="h-8 gap-1 text-xs"
+            onClick={save}
+            disabled={!isDirty || writeDoc.isPending}
+          >
+            <Save className="h-3.5 w-3.5" /> Save
+          </Button>
+        </div>
       </div>
+
+      <ConfirmDialog
+        open={confirmDelete}
+        onOpenChange={setConfirmDelete}
+        title="Delete this document?"
+        description={
+          <>
+            <span className="break-all font-mono">{doc.path}</span> will be
+            permanently deleted. This can’t be undone.
+          </>
+        }
+        confirmLabel="Delete document"
+        onConfirm={remove}
+        busy={deleteDoc.isPending}
+      />
     </div>
   )
 }
@@ -196,12 +295,15 @@ interface FieldRowProps {
   value: FieldValue
   dirty: boolean
   onChange: (next: FieldValue) => void
-  onRename: (next: string) => void
+  /** Returns an error message when the rename is rejected. */
+  onRename: (next: string) => string | null
   onDelete: () => void
 }
 
 function FieldRow({ name, value, dirty, onChange, onRename, onDelete }: FieldRowProps) {
   const [localName, setLocalName] = useState(name)
+  const [renameError, setRenameError] = useState<string | null>(null)
+  const errorId = useId()
   return (
     <div
       className={cn(
@@ -211,21 +313,38 @@ function FieldRow({ name, value, dirty, onChange, onRename, onDelete }: FieldRow
     >
       <div className="mb-2 flex items-center gap-2">
         <Input
+          aria-label={`Name of field ${name}`}
+          aria-invalid={!!renameError}
+          aria-describedby={renameError ? errorId : undefined}
           className="h-7 flex-1 font-mono text-xs"
           value={localName}
-          onChange={(e) => setLocalName(e.target.value)}
-          onBlur={() => onRename(localName)}
+          onChange={(e) => {
+            setLocalName(e.target.value)
+            setRenameError(null)
+          }}
+          onBlur={() => setRenameError(onRename(localName.trim()))}
         />
         {dirty && (
-          <Badge variant="outline" className="text-[10px]">
-            modified
+          <Badge variant="outline" className="text-2xs">
+            Modified
           </Badge>
         )}
-        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={onDelete}>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-7 w-7"
+          aria-label={`Delete field ${name}`}
+          onClick={onDelete}
+        >
           <Trash2 className="h-3.5 w-3.5" />
         </Button>
       </div>
-      <FieldEditor value={value} onChange={onChange} compact />
+      {renameError && (
+        <p id={errorId} className="mb-2 text-xs text-destructive">
+          {renameError}
+        </p>
+      )}
+      <FieldEditor value={value} onChange={onChange} label={name} compact />
     </div>
   )
 }
@@ -242,14 +361,20 @@ function InspectorHeader({
   return (
     <div className="flex items-center gap-2 border-b px-3 py-2">
       <div className="min-w-0 flex-1">
-        <p className="truncate font-mono text-xs">{path}</p>
+        <p className="truncate font-mono text-xs" title={path}>{path}</p>
         {dirty && (
-          <Badge variant="outline" className="mt-1 text-[10px]">
-            unsaved changes
+          <Badge variant="outline" className="mt-1 text-2xs">
+            Unsaved changes
           </Badge>
         )}
       </div>
-      <Button variant="ghost" size="icon" className="h-7 w-7" onClick={onClose}>
+      <Button
+        variant="ghost"
+        size="icon"
+        className="h-7 w-7"
+        aria-label="Close inspector"
+        onClick={onClose}
+      >
         <X className="h-4 w-4" />
       </Button>
     </div>
@@ -272,7 +397,7 @@ function SubcollectionsList({
     )
   }
   if (error) {
-    return <p className="p-3 text-xs text-destructive">Failed to load subcollections</p>
+    return <p className="p-3 text-xs text-destructive">Unable to load subcollections. Try again.</p>
   }
   if (!data || data.length === 0) {
     return <p className="p-3 text-xs text-muted-foreground">No subcollections</p>

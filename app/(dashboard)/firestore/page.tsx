@@ -1,6 +1,6 @@
 "use client"
 
-import { Suspense, useCallback, useMemo, useState } from "react"
+import { Suspense, useCallback, useMemo, useRef, useState } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { Database, Loader2, Plus } from "lucide-react"
 import { toast } from "sonner"
@@ -16,6 +16,7 @@ import { DocumentInspector } from "@/components/firestore/document-inspector"
 import { BulkActionsBar } from "@/components/firestore/bulk-actions-bar"
 import { ScopeBanner } from "@/components/firestore/scope-banner"
 import { NewDocumentDialog } from "@/components/firestore/new-document-dialog"
+import { ConfirmDialog } from "@/components/firestore/confirm-dialog"
 import {
   FirestoreTabsBar,
   type FirestoreTab,
@@ -36,6 +37,29 @@ import { collectFieldPaths } from "@/lib/firestore/fields"
 import type { QueryState } from "@/types/firestore"
 
 const PAGE_SIZE = 50
+
+// Side panels never take more than this share of the grid, so the documents
+// column and the inspector's actions stay on screen at any width or zoom.
+const COLLECTIONS_SHARE = 0.25
+const INSPECTOR_SHARE = 0.45
+
+/** Clamps a panel's stored width (and its handle's range) to what fits. */
+function fitPanel(
+  value: number,
+  gridWidth: number | null,
+  share: number,
+  min: number,
+  max: number
+) {
+  const cap = gridWidth ? Math.floor(gridWidth * share) : max
+  const hi = Math.max(0, Math.min(max, cap))
+  const lo = Math.min(min, hi)
+  return { value: Math.min(Math.max(value, lo), hi), min: lo, max: hi }
+}
+
+function documentsLabel(count: number): string {
+  return count === 1 ? "1 document" : `${count} documents`
+}
 
 function emptyQueryState(collectionPath: string, allDescendants = false): QueryState {
   const parts = collectionPath.split("/").filter(Boolean)
@@ -79,6 +103,15 @@ function FirestorePageContent() {
   const [collectionsWidth, setCollectionsWidth] = useState(260)
   const [collectionsCollapsed, setCollectionsCollapsed] = useState(false)
   const [inspectorWidth, setInspectorWidth] = useState(420)
+  const [gridWidth, setGridWidth] = useState<number | null>(null)
+  const observeGrid = useCallback((el: HTMLDivElement | null) => {
+    if (!el) return
+    const observer = new ResizeObserver(([entry]) =>
+      setGridWidth(entry.contentRect.width)
+    )
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [])
   const [fallbackActiveTabId, setFallbackActiveTabId] = useState("initial")
   const urlTabId = searchParams.get("tab")
   const urlOwnerTabId = urlTabId
@@ -189,7 +222,7 @@ function FirestorePageContent() {
       <div className="flex h-full items-center justify-center">
         <div className="text-center">
           <Database className="mx-auto h-12 w-12 text-muted-foreground/50" />
-          <h2 className="mt-4 text-xl font-semibold">No Project Selected</h2>
+          <h2 className="mt-4 text-xl font-semibold">No project selected</h2>
           <p className="mt-2 text-muted-foreground">
             Please select a project from the projects page.
           </p>
@@ -206,15 +239,20 @@ function FirestorePageContent() {
     )
   }
 
-  const effectiveCollectionsWidth = collectionsCollapsed ? 52 : collectionsWidth
+  const collections = fitPanel(collectionsWidth, gridWidth, COLLECTIONS_SHARE, 180, 480)
+  const inspector = fitPanel(inspectorWidth, gridWidth, INSPECTOR_SHARE, 280, 640)
+  const collectionsColumn = collectionsCollapsed ? 52 : collections.value
 
   return (
     <div
+      ref={observeGrid}
       className="grid h-full grid-rows-[36px_minmax(0,1fr)] overflow-hidden bg-card"
       style={{
-        gridTemplateColumns: `${effectiveCollectionsWidth}px ${collectionsCollapsed ? 0 : 8}px minmax(320px, 1fr) 8px ${inspectorWidth}px`,
+        // The CSS min() covers the first paint, before the grid is measured.
+        gridTemplateColumns: `min(${collectionsColumn}px, ${COLLECTIONS_SHARE * 100}%) ${collectionsCollapsed ? 0 : 8}px minmax(0, 1fr) 8px min(${inspector.value}px, ${INSPECTOR_SHARE * 100}%)`,
       }}
     >
+      <h1 className="sr-only">Firestore data for {selectedProject.displayName}</h1>
       <div className="col-start-1 row-span-2 min-h-0 overflow-hidden">
         <CollectionsTree
           selectedPath={path}
@@ -230,9 +268,9 @@ function FirestorePageContent() {
       {!collectionsCollapsed && (
         <ColumnResizeHandle
           label="collections"
-          value={collectionsWidth}
-          min={180}
-          max={480}
+          value={collections.value}
+          min={collections.min}
+          max={collections.max}
           edge="left"
           className="col-start-2 row-span-2 row-start-1"
           onChange={setCollectionsWidth}
@@ -251,9 +289,9 @@ function FirestorePageContent() {
 
       <ColumnResizeHandle
         label="document inspector"
-        value={inspectorWidth}
-        min={280}
-        max={640}
+        value={inspector.value}
+        min={inspector.min}
+        max={inspector.max}
         edge="right"
         className="col-start-4 row-start-2"
         onChange={setInspectorWidth}
@@ -291,15 +329,18 @@ function FirestoreWorkspace({
     return ""
   })()
   const docPath = isDocPath(tab.path) ? tab.path : null
+  const panelRef = useRef<HTMLDivElement>(null)
 
   return (
     <>
       <div
+        ref={panelRef}
         id={`firestore-panel-${tab.id}`}
         role="tabpanel"
         aria-labelledby={`firestore-tab-${tab.id}`}
+        tabIndex={-1}
         hidden={!active}
-        className="col-start-3 row-start-2 flex min-h-0 flex-col overflow-hidden"
+        className="col-start-3 row-start-2 flex min-h-0 flex-col overflow-hidden outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
       >
         {collectionPath ? (
           <CollectionView
@@ -321,7 +362,8 @@ function FirestoreWorkspace({
         )}
       </div>
 
-      <div
+      <aside
+        aria-label="Document inspector"
         hidden={!active}
         className="col-start-5 row-start-2 min-h-0 overflow-hidden border-l"
       >
@@ -332,10 +374,13 @@ function FirestoreWorkspace({
               ? parentCollection(docPath) ?? parentDoc(docPath) ?? ""
               : ""
             onNavigate(parent, tab.collectionGroup)
+            // Closing (or deleting) removes the focused control; land on the
+            // documents panel instead of the top of the page.
+            requestAnimationFrame(() => panelRef.current?.focus())
           }}
           onNavigate={(next) => onNavigate(next, tab.collectionGroup)}
         />
-      </div>
+      </aside>
     </>
   )
 }
@@ -362,6 +407,8 @@ function CollectionView({ collectionPath, cgFlag, docPath, onOpenDocument }: Col
   const [tokenStack, setTokenStack] = useState<(string | undefined)[]>([undefined])
   const [failedPaths, setFailedPaths] = useState<Set<string>>(new Set())
   const [newDocOpen, setNewDocOpen] = useState(false)
+  const [confirmBulkDelete, setConfirmBulkDelete] = useState(false)
+  const tableRef = useRef<HTMLDivElement>(null)
 
   const browse = useDocuments(collectionPath, {
     pageSize: PAGE_SIZE,
@@ -393,11 +440,11 @@ function CollectionView({ collectionPath, cgFlag, docPath, onOpenDocument }: Col
     <>
       <div className="flex items-center justify-between border-b px-4 py-2">
         <div className="flex items-center gap-2">
-          <Badge variant="outline" className="font-mono text-[11px]">
+          <Badge variant="outline" className="font-mono text-2xs">
             {collectionPath}
           </Badge>
           {queryState.allDescendants && (
-            <Badge className="text-[11px]">collectionGroup</Badge>
+            <Badge className="text-2xs">collectionGroup</Badge>
           )}
         </div>
         <Button
@@ -440,6 +487,7 @@ function CollectionView({ collectionPath, cgFlag, docPath, onOpenDocument }: Col
         </div>
       )}
       <DocumentsTable
+        ref={tableRef}
         documents={documents}
         isLoading={isLoading}
         selectedId={docPath}
@@ -477,7 +525,9 @@ function CollectionView({ collectionPath, cgFlag, docPath, onOpenDocument }: Col
             .map((d) => d.id)
             .join("\n")
           await navigator.clipboard.writeText(ids)
-          toast.success(`Copied ${selection.size} ids`)
+          toast.success(
+            `Copied ${selection.size} document ${selection.size === 1 ? "ID" : "IDs"}`
+          )
         }}
         onExportJson={() => {
           const docs = documents.filter((d) => selection.has(d.path))
@@ -495,10 +545,19 @@ function CollectionView({ collectionPath, cgFlag, docPath, onOpenDocument }: Col
             "text/csv"
           )
         }}
-        onDelete={async () => {
+        onDelete={() => setConfirmBulkDelete(true)}
+      />
+      <ConfirmDialog
+        open={confirmBulkDelete}
+        onOpenChange={setConfirmBulkDelete}
+        title={`Delete ${documentsLabel(selection.size)}?`}
+        description={`The selected ${selection.size === 1 ? "document" : "documents"} will be permanently deleted. This can’t be undone.`}
+        confirmLabel={`Delete ${documentsLabel(selection.size)}`}
+        busy={batch.isPending}
+        onConfirm={async () => {
           const paths = Array.from(selection)
           if (paths.length === 0) return
-          if (!confirm(`Delete ${paths.length} document${paths.length === 1 ? "" : "s"}? This cannot be undone.`)) return
+          setConfirmBulkDelete(false)
           const writes = paths.map((p) => ({ kind: "delete" as const, path: p }))
           const t = toast.loading(`Deleting 0 / ${paths.length}...`)
           try {
@@ -517,17 +576,21 @@ function CollectionView({ collectionPath, cgFlag, docPath, onOpenDocument }: Col
                 )
               )
               toast.error(
-                `Deleted ${result.succeeded}, failed ${result.failed.length}`,
-                { id: t }
+                `Deleted ${documentsLabel(result.succeeded)}. ${documentsLabel(result.failed.length)} could not be deleted and ${result.failed.length === 1 ? "is" : "are"} marked in the table.`,
+                { id: t, duration: Infinity }
               )
             } else {
-              toast.success(`Deleted ${result.succeeded} documents`, { id: t })
+              toast.success(`Deleted ${documentsLabel(result.succeeded)}`, { id: t })
             }
             setSelection(new Set())
+            // The bulk bar (and its Delete button) unmounts with the selection.
+            requestAnimationFrame(() => tableRef.current?.focus())
           } catch (err) {
             toast.error(
-              err instanceof FirestoreError ? err.message : "Bulk delete failed",
-              { id: t }
+              err instanceof FirestoreError
+                ? err.message
+                : "Unable to delete the selected documents. Try again.",
+              { id: t, duration: Infinity }
             )
           }
         }}

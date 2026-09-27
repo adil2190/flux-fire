@@ -1,7 +1,7 @@
 "use client"
 
 import { Plus, Play, RotateCcw, Trash2, ChevronUp, ChevronDown } from "lucide-react"
-import { useState } from "react"
+import { useId, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import {
@@ -57,6 +57,7 @@ export function QueryBuilder({
   fieldPaths,
 }: Props) {
   const [open, setOpen] = useState(true)
+  const limitId = useId()
   const inequalities = inequalityFields(state.filters)
   const orderByMismatch =
     inequalities.length > 0 &&
@@ -71,16 +72,17 @@ export function QueryBuilder({
             variant="ghost"
             size="sm"
             className="h-7 px-2"
+            aria-expanded={open}
             onClick={() => setOpen((v) => !v)}
           >
             {open ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
             <span className="ml-1 text-xs">Query</span>
           </Button>
-          <Badge variant="outline" className="font-mono text-[11px]">
+          <Badge variant="outline" className="font-mono text-2xs">
             {state.allDescendants ? `collectionGroup(${state.collectionId})` : state.collectionId || "(no collection)"}
           </Badge>
           {state.filters.length > 0 && (
-            <Badge variant="secondary" className="text-[11px]">
+            <Badge variant="secondary" className="text-2xs">
               {state.filters.length} filter{state.filters.length === 1 ? "" : "s"}
             </Badge>
           )}
@@ -97,7 +99,7 @@ export function QueryBuilder({
           <Button
             size="sm"
             className="h-7 gap-1 text-xs"
-            disabled={isRunning || !state.collectionId}
+            disabled={isRunning}
             onClick={onRun}
           >
             <Play className="h-3.5 w-3.5" /> Run
@@ -120,16 +122,16 @@ export function QueryBuilder({
           <div className="space-y-1">
             <div className="flex min-h-7 items-center justify-between gap-2">
               <div className="flex items-center gap-2">
-                <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Where</p>
+                <p className="text-2xs font-medium uppercase tracking-wide text-muted-foreground">Where</p>
                 {state.filters.length === 0 && (
-                  <span className="text-[11px] text-muted-foreground">No filters</span>
+                  <span className="text-2xs text-muted-foreground">No filters</span>
                 )}
               </div>
               <Button
                 type="button"
                 variant="outline"
                 size="sm"
-                className="h-6 gap-1 px-2 text-[11px]"
+                className="h-6 gap-1 px-2 text-2xs"
                 onClick={() =>
                   onChange({
                     ...state,
@@ -170,16 +172,16 @@ export function QueryBuilder({
           <div className="space-y-1">
             <div className="flex min-h-7 items-center justify-between gap-2">
               <div className="flex items-center gap-2">
-                <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Order by</p>
+                <p className="text-2xs font-medium uppercase tracking-wide text-muted-foreground">Order by</p>
                 {state.orderBy.length === 0 && (
-                  <span className="text-[11px] text-muted-foreground">Default document order</span>
+                  <span className="text-2xs text-muted-foreground">Default document order</span>
                 )}
               </div>
               <Button
                 type="button"
                 variant="outline"
                 size="sm"
-                className="h-6 gap-1 px-2 text-[11px]"
+                className="h-6 gap-1 px-2 text-2xs"
                 onClick={() =>
                   onChange({
                     ...state,
@@ -213,9 +215,11 @@ export function QueryBuilder({
           </div>
 
           <div className="flex items-center gap-2">
-            <Label className="text-xs">Limit</Label>
+            <Label htmlFor={limitId} className="text-xs">Limit</Label>
             <Input
+              id={limitId}
               type="number"
+              min={0}
               className="h-7 w-24 text-xs"
               value={state.limit}
               onChange={(e) =>
@@ -272,6 +276,7 @@ function FilterRow({
         />
       ) : (
         <Input
+          aria-label="Filter field path"
           placeholder="field.path"
           className={cn(
             "h-8 font-mono text-xs",
@@ -286,6 +291,7 @@ function FilterRow({
         onValueChange={(v) => onChange({ ...filter, op: v as FilterOp })}
       >
         <SelectTrigger
+          aria-label="Filter operator"
           className={cn(
             "h-8 w-40 text-xs",
             stacked && "col-start-2 row-start-1"
@@ -304,15 +310,21 @@ function FilterRow({
       <div
         className={cn(
           "flex-1",
-          stacked && "col-span-3 col-start-1 row-start-2",
-          unary && "pointer-events-none opacity-40"
+          stacked && "col-span-3 col-start-1 row-start-2"
         )}
       >
-        <FieldEditor
-          value={filter.value}
-          onChange={(v) => onChange({ ...filter, value: v })}
-          compact
-        />
+        {unary ? (
+          <p className="flex h-8 items-center text-xs text-muted-foreground">
+            No value needed for this operator
+          </p>
+        ) : (
+          <FieldEditor
+            value={filter.value}
+            onChange={(v) => onChange({ ...filter, value: v })}
+            label="Filter"
+            compact
+          />
+        )}
       </div>
       <Button
         type="button"
@@ -322,6 +334,7 @@ function FilterRow({
           "h-8 w-8",
           stacked && "col-start-3 row-start-1"
         )}
+        aria-label={filter.field ? `Remove filter on ${filter.field}` : "Remove filter"}
         onClick={onRemove}
       >
         <Trash2 className="h-3.5 w-3.5" />
@@ -363,6 +376,7 @@ function OrderByRow({
         />
       ) : (
         <Input
+          aria-label="Order by field path"
           placeholder="field.path"
           className={cn(
             "h-8 font-mono text-xs",
@@ -376,7 +390,7 @@ function OrderByRow({
         value={orderBy.dir}
         onValueChange={(v) => onChange({ ...orderBy, dir: v as "asc" | "desc" })}
       >
-        <SelectTrigger className="h-8 w-28 text-xs">
+        <SelectTrigger className="h-8 w-28 text-xs" aria-label="Sort direction">
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
@@ -389,6 +403,7 @@ function OrderByRow({
         variant="ghost"
         size="icon"
         className="h-8 w-8"
+        aria-label={orderBy.field ? `Remove ordering by ${orderBy.field}` : "Remove ordering"}
         onClick={onRemove}
       >
         <Trash2 className="h-3.5 w-3.5" />

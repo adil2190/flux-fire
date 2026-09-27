@@ -84,7 +84,7 @@ export function Sidebar() {
   return (
     <aside
       className={cn(
-        "flex h-full shrink-0 flex-col border-r bg-card transition-[width] duration-200",
+        "flex h-full shrink-0 flex-col border-r bg-card transition-[width] duration-200 motion-reduce:transition-none",
         collapsed ? "w-16" : "w-64"
       )}
     >
@@ -116,7 +116,10 @@ export function Sidebar() {
               {!collapsed && (
                 <span className="flex min-w-0 flex-1 items-center justify-between gap-2 text-left">
                   <span className="min-w-0">
-                    <span className="block truncate font-semibold">
+                    <span
+                      className="block truncate font-semibold"
+                      title={selectedProject?.displayName}
+                    >
                       {selectedProject?.displayName || "Fluxfire"}
                     </span>
                     <span className="block text-xs text-muted-foreground">
@@ -131,7 +134,7 @@ export function Sidebar() {
           <DropdownMenuContent align={collapsed ? "start" : "end"}>
             <DropdownMenuItem onClick={() => router.push("/projects")}>
               <FolderOpen className="mr-2 h-4 w-4" />
-              Switch Project
+              Switch project
             </DropdownMenuItem>
             <DropdownMenuItem onClick={handleDisconnect}>
               <LogOut className="mr-2 h-4 w-4" />
@@ -166,6 +169,7 @@ export function Sidebar() {
             <Link
               key={href}
               href={href}
+              aria-current={isActive ? "page" : undefined}
               title={collapsed ? label : undefined}
               aria-label={collapsed ? label : undefined}
               className={cn(
@@ -188,29 +192,52 @@ export function Sidebar() {
       {/* Emulator Toggle */}
       <div className={cn("p-4", collapsed && "p-2")}>
         {collapsed ? (
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            className="mx-auto h-9 w-9"
-            aria-label={useEmulator ? "Disable emulator" : "Enable emulator"}
-            title={useEmulator ? "Emulator on" : "Emulator off"}
-            onClick={toggleEmulator}
-          >
-            <Zap
+          <div className="flex flex-col items-center gap-0.5">
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="h-9 w-9"
+              aria-label="Emulator"
+              aria-pressed={useEmulator}
+              title={
+                useEmulator
+                  ? "Using local emulators. Click to switch to production."
+                  : "Using production. Click to switch to local emulators."
+              }
+              onClick={toggleEmulator}
+            >
+              <Zap
+                className={cn(
+                  "h-4 w-4",
+                  useEmulator
+                    ? "text-amber-600 dark:text-amber-400"
+                    : "text-muted-foreground"
+                )}
+              />
+            </Button>
+            {/* Visible environment label: the icon color alone isn't enough. */}
+            <span
+              aria-hidden
               className={cn(
-                "h-4 w-4",
-                useEmulator ? "text-yellow-500" : "text-muted-foreground"
+                "text-2xs font-medium",
+                useEmulator
+                  ? "text-amber-700 dark:text-amber-400"
+                  : "text-muted-foreground"
               )}
-            />
-          </Button>
+            >
+              {useEmulator ? "Emu" : "Prod"}
+            </span>
+          </div>
         ) : (
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               <Zap
                 className={cn(
                   "h-4 w-4",
-                  useEmulator ? "text-yellow-500" : "text-muted-foreground"
+                  useEmulator
+                    ? "text-amber-600 dark:text-amber-400"
+                    : "text-muted-foreground"
                 )}
               />
               <Label htmlFor="emulator-sidebar" className="text-sm font-medium">
@@ -252,7 +279,9 @@ export function Sidebar() {
                 <AvatarFallback className="text-xs">{userInitials}</AvatarFallback>
               </Avatar>
               {!collapsed && (
-                <span className="truncate text-sm">{session?.user?.name}</span>
+                <span className="truncate text-sm" title={session?.user?.name ?? undefined}>
+                  {session?.user?.name}
+                </span>
               )}
             </Button>
           </DropdownMenuTrigger>

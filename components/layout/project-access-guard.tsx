@@ -47,7 +47,7 @@ export function ProjectAccessGuard({ children }: { children: React.ReactNode }) 
     qc.removeQueries({ queryKey: ["firebase-project-access", projectId] })
     qc.removeQueries({ queryKey: ["firebase-projects"] })
     disconnect()
-    toast.error("Your access to this project was removed.")
+    toast.error("Your access to this project was removed.", { duration: Infinity })
     router.replace("/projects")
   }, [
     accessRevoked,

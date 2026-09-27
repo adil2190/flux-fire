@@ -66,8 +66,8 @@ export function FirestoreTabsBar({
                 <Icon className="h-3.5 w-3.5 shrink-0" />
                 <span className="truncate font-mono">{label}</span>
                 {tab.collectionGroup && (
-                  <span className="shrink-0 rounded bg-secondary px-1 text-[9px] font-medium">
-                    group
+                  <span className="shrink-0 rounded bg-secondary px-1 text-2xs font-medium">
+                    Group
                   </span>
                 )}
               </button>
@@ -75,7 +75,7 @@ export function FirestoreTabsBar({
                 <button
                   type="button"
                   aria-label={`Close ${label} tab`}
-                  className="mr-1 rounded p-0.5 opacity-60 outline-none hover:bg-accent hover:opacity-100 focus-visible:ring-2 focus-visible:ring-ring group-hover:opacity-100"
+                  className="mr-0.5 rounded p-1.5 opacity-60 outline-none hover:bg-accent hover:opacity-100 focus-visible:ring-2 focus-visible:ring-ring group-hover:opacity-100"
                   onClick={() => onClose(tab.id)}
                 >
                   <X className="h-3 w-3" />

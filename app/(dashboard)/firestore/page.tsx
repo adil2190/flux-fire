@@ -2,19 +2,21 @@
 
 import { Activity, Suspense, memo, useCallback, useMemo, useRef, useState } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
-import { Database, Loader2, Plus } from "lucide-react"
+import { Database, Loader2, Plus, Trash2 } from "lucide-react"
 import { toast } from "sonner"
 import { useProjectStore } from "@/stores/project-store"
 import { useFirestoreSession } from "@/hooks/firestore/use-firestore-session"
 import { useDocuments } from "@/hooks/firestore/use-documents"
 import { useRunQuery } from "@/hooks/firestore/use-run-query"
 import { useBatchCommit } from "@/hooks/firestore/use-batch-commit"
-import { CollectionsTree } from "@/components/firestore/collections-tree"
+import { CollectionsRail, CollectionsTree } from "@/components/firestore/collections-tree"
 import { DocumentsTable } from "@/components/firestore/documents-table"
 import { QueryBuilder } from "@/components/firestore/query-builder"
 import { DocumentInspector } from "@/components/firestore/document-inspector"
 import { BulkActionsBar } from "@/components/firestore/bulk-actions-bar"
-import { ScopeBanner } from "@/components/firestore/scope-banner"
+import { ScopeRequiredBanner } from "@/components/firestore/scope-banner"
+import { FirestoreErrorNotice } from "@/components/firestore/firestore-error-notice"
+import { ExportActions } from "@/components/firestore/export-actions"
 import { NewDocumentDialog } from "@/components/firestore/new-document-dialog"
 import { ConfirmDialog } from "@/components/firestore/confirm-dialog"
 import {
@@ -31,8 +33,7 @@ import {
   parentCollection,
   collectionId as collIdOf,
 } from "@/lib/firestore/paths"
-import { FirestoreError, isPermissionDenied } from "@/lib/firestore/errors"
-import { exportCsv, exportJson, downloadBlob } from "@/lib/firestore/export"
+import { FirestoreError } from "@/lib/firestore/errors"
 import { collectFieldPaths } from "@/lib/firestore/fields"
 import type { QueryState } from "@/types/firestore"
 
@@ -253,7 +254,7 @@ function FirestorePageContent() {
   if (session.scopeError) {
     return (
       <div className="p-6">
-        <ScopeBanner />
+        <ScopeRequiredBanner />
       </div>
     )
   }
@@ -283,15 +284,18 @@ function FirestorePageContent() {
     >
       <h1 className="sr-only">Firestore data for {selectedProject.displayName}</h1>
       <div className="col-start-1 row-span-2 min-h-0 overflow-hidden">
-        <CollectionsTree
-          selectedPath={path}
-          collapsed={collectionsCollapsed}
-          onToggleCollapsed={() => setCollectionsCollapsed((value) => !value)}
-          onSelect={(next) => {
-            if (isCollectionPath(next)) openCollectionTab(next)
-            else setUrlPath(next)
-          }}
-        />
+        {collectionsCollapsed ? (
+          <CollectionsRail onExpand={() => setCollectionsCollapsed(false)} />
+        ) : (
+          <CollectionsTree
+            selectedPath={path}
+            onCollapse={() => setCollectionsCollapsed(true)}
+            onSelect={(next) => {
+              if (isCollectionPath(next)) openCollectionTab(next)
+              else setUrlPath(next)
+            }}
+          />
+        )}
       </div>
 
       {!collectionsCollapsed && (
@@ -460,12 +464,16 @@ function CollectionView({ collectionPath, cgFlag, docPath, onOpenDocument }: Col
     [browse.data?.documents, queryRun.data]
   )
 
-  const documents = activeQuery ? queryRun.data ?? [] : browse.data?.documents ?? []
+  const documents = useMemo(
+    () => (activeQuery ? queryRun.data ?? [] : browse.data?.documents ?? []),
+    [activeQuery, queryRun.data, browse.data?.documents]
+  )
   const isLoading = activeQuery ? queryRun.isLoading : browse.isLoading
   const error = activeQuery ? queryRun.error : browse.error
-  const errorObj = error instanceof FirestoreError ? error : null
-  const showPermissionBanner = !!errorObj && isPermissionDenied(errorObj)
-  const indexUrl = errorObj?.indexUrl
+  const selectedDocuments = useMemo(
+    () => documents.filter((d) => selection.has(d.path)),
+    [documents, selection]
+  )
 
   const nextPageToken = activeQuery ? undefined : browse.data?.nextPageToken
   const pageNum = tokenStack.length
@@ -505,21 +513,7 @@ function CollectionView({ collectionPath, cgFlag, docPath, onOpenDocument }: Col
         }}
         isRunning={queryRun.isFetching}
       />
-      {showPermissionBanner && (
-        <div className="border-b px-4 py-2">
-          <ScopeBanner variant="permission" message={errorObj?.message} />
-        </div>
-      )}
-      {indexUrl && (
-        <div className="border-b px-4 py-2">
-          <ScopeBanner variant="index" indexUrl={indexUrl} />
-        </div>
-      )}
-      {errorObj && !showPermissionBanner && !indexUrl && (
-        <div className="border-b bg-destructive/10 px-4 py-2 text-xs text-destructive">
-          {errorObj.message}
-        </div>
-      )}
+      <FirestoreErrorNotice error={error} />
       <DocumentsTable
         ref={tableRef}
         documents={documents}
@@ -549,38 +543,21 @@ function CollectionView({ collectionPath, cgFlag, docPath, onOpenDocument }: Col
               }
         }
       />
-      <BulkActionsBar
-        count={selection.size}
-        busy={batch.isPending}
-        onClear={() => setSelection(new Set())}
-        onCopyIds={async () => {
-          const ids = documents
-            .filter((d) => selection.has(d.path))
-            .map((d) => d.id)
-            .join("\n")
-          await navigator.clipboard.writeText(ids)
-          toast.success(
-            `Copied ${selection.size} document ${selection.size === 1 ? "ID" : "IDs"}`
-          )
-        }}
-        onExportJson={() => {
-          const docs = documents.filter((d) => selection.has(d.path))
-          downloadBlob(
-            exportJson(docs),
-            `${collIdOf(collectionPath)}-${Date.now()}.json`,
-            "application/json"
-          )
-        }}
-        onExportCsv={() => {
-          const docs = documents.filter((d) => selection.has(d.path))
-          downloadBlob(
-            exportCsv(docs),
-            `${collIdOf(collectionPath)}-${Date.now()}.csv`,
-            "text/csv"
-          )
-        }}
-        onDelete={() => setConfirmBulkDelete(true)}
-      />
+      <BulkActionsBar count={selection.size} onClear={() => setSelection(new Set())}>
+        <ExportActions
+          documents={selectedDocuments}
+          filenameBase={collIdOf(collectionPath)}
+        />
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-7 gap-1 text-xs text-destructive hover:text-destructive"
+          disabled={batch.isPending}
+          onClick={() => setConfirmBulkDelete(true)}
+        >
+          <Trash2 className="h-3.5 w-3.5" /> Delete
+        </Button>
+      </BulkActionsBar>
       <ConfirmDialog
         open={confirmBulkDelete}
         onOpenChange={setConfirmBulkDelete}

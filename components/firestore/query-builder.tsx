@@ -17,7 +17,6 @@ import { Badge } from "@/components/ui/badge"
 import { FieldEditor } from "./field-editor"
 import { FieldPathCombobox } from "./field-path-combobox"
 import { isUnaryOp, inequalityFields, MAX_QUERY_LIMIT } from "@/lib/firestore/queries"
-import { cn } from "@/lib/utils"
 import type { FilterOp, OrderBy, QueryFilter, QueryState } from "@/types/firestore"
 
 interface Props {
@@ -26,8 +25,8 @@ interface Props {
   onRun: () => void
   onReset: () => void
   isRunning: boolean
-  layout?: "inline" | "stacked"
-  fieldPaths?: string[]
+  /** Suggestions for filter and order fields; custom paths can still be typed. */
+  fieldPaths: string[]
 }
 
 const ALL_OPS: { value: FilterOp; label: string }[] = [
@@ -53,7 +52,6 @@ export function QueryBuilder({
   onRun,
   onReset,
   isRunning,
-  layout = "inline",
   fieldPaths,
 }: Props) {
   const [open, setOpen] = useState(true)
@@ -64,8 +62,10 @@ export function QueryBuilder({
     state.orderBy.length > 0 &&
     state.orderBy[0].field !== inequalities[0]
 
+  // Rows stack by default and go inline once the builder is wide enough, so
+  // the layout follows the panel width instead of a prop.
   return (
-    <div className="border-b bg-card">
+    <div className="@container border-b bg-card">
       <div className="flex items-center justify-between px-3 py-1.5">
         <div className="flex items-center gap-2">
           <Button
@@ -154,7 +154,6 @@ export function QueryBuilder({
               <FilterRow
                 key={f.id}
                 filter={f}
-                layout={layout}
                 fieldPaths={fieldPaths}
                 onChange={(next) =>
                   onChange({
@@ -196,7 +195,6 @@ export function QueryBuilder({
               <OrderByRow
                 key={idx}
                 orderBy={o}
-                layout={layout}
                 fieldPaths={fieldPaths}
                 onChange={(next) =>
                   onChange({
@@ -252,58 +250,28 @@ interface FilterRowProps {
   filter: QueryFilter
   onChange: (next: QueryFilter) => void
   onRemove: () => void
-  layout: "inline" | "stacked"
-  fieldPaths?: string[]
+  fieldPaths: string[]
 }
 
-function FilterRow({
-  filter,
-  onChange,
-  onRemove,
-  layout,
-  fieldPaths,
-}: FilterRowProps) {
+function FilterRow({ filter, onChange, onRemove, fieldPaths }: FilterRowProps) {
   const unary = isUnaryOp(filter.op)
-  const stacked = layout === "stacked"
 
   return (
-    <div
-      className={cn(
-        "gap-2",
-        stacked
-          ? "grid grid-cols-[minmax(0,1fr)_10rem_2rem] items-start"
-          : "flex items-start"
-      )}
-    >
-      {fieldPaths ? (
-        <FieldPathCombobox
-          value={filter.field}
-          options={fieldPaths}
-          onChange={(field) => onChange({ ...filter, field })}
-          className={stacked ? "col-start-1 row-start-1 w-full" : "w-48"}
-        />
-      ) : (
-        <Input
-          aria-label="Filter field path"
-          placeholder="field.path"
-          className={cn(
-            "h-8 font-mono text-xs",
-            stacked ? "col-start-1 row-start-1 w-full" : "w-48"
-          )}
-          value={filter.field}
-          onChange={(e) => onChange({ ...filter, field: e.target.value })}
-        />
-      )}
+    <div className="grid grid-cols-[minmax(0,1fr)_10rem_2rem] items-start gap-2 @2xl:flex">
+      <FieldPathCombobox
+        aria-label="Filter field path"
+        value={filter.field}
+        options={fieldPaths}
+        onChange={(field) => onChange({ ...filter, field })}
+        className="col-start-1 row-start-1 w-full @2xl:w-48"
+      />
       <Select
         value={filter.op}
         onValueChange={(v) => onChange({ ...filter, op: v as FilterOp })}
       >
         <SelectTrigger
           aria-label="Filter operator"
-          className={cn(
-            "h-8 w-40 text-xs",
-            stacked && "col-start-2 row-start-1"
-          )}
+          className="col-start-2 row-start-1 h-8 w-40 text-xs"
         >
           <SelectValue />
         </SelectTrigger>
@@ -315,12 +283,7 @@ function FilterRow({
           ))}
         </SelectContent>
       </Select>
-      <div
-        className={cn(
-          "flex-1",
-          stacked && "col-span-3 col-start-1 row-start-2"
-        )}
-      >
+      <div className="col-span-3 col-start-1 row-start-2 @2xl:flex-1">
         {unary ? (
           <p className="flex h-8 items-center text-xs text-muted-foreground">
             No value needed for this operator
@@ -330,7 +293,6 @@ function FilterRow({
             value={filter.value}
             onChange={(v) => onChange({ ...filter, value: v })}
             label="Filter"
-            compact
           />
         )}
       </div>
@@ -338,10 +300,7 @@ function FilterRow({
         type="button"
         variant="ghost"
         size="icon"
-        className={cn(
-          "h-8 w-8",
-          stacked && "col-start-3 row-start-1"
-        )}
+        className="col-start-3 row-start-1 h-8 w-8"
         aria-label={filter.field ? `Remove filter on ${filter.field}` : "Remove filter"}
         onClick={onRemove}
       >
@@ -355,45 +314,19 @@ interface OrderByRowProps {
   orderBy: OrderBy
   onChange: (next: OrderBy) => void
   onRemove: () => void
-  layout: "inline" | "stacked"
-  fieldPaths?: string[]
+  fieldPaths: string[]
 }
 
-function OrderByRow({
-  orderBy,
-  onChange,
-  onRemove,
-  layout,
-  fieldPaths,
-}: OrderByRowProps) {
-  const stacked = layout === "stacked"
-
+function OrderByRow({ orderBy, onChange, onRemove, fieldPaths }: OrderByRowProps) {
   return (
-    <div
-      className={cn(
-        "flex items-center gap-2",
-        stacked && "grid grid-cols-[minmax(0,1fr)_7rem_2rem]"
-      )}
-    >
-      {fieldPaths ? (
-        <FieldPathCombobox
-          value={orderBy.field}
-          options={fieldPaths}
-          onChange={(field) => onChange({ ...orderBy, field })}
-          className={stacked ? "w-full" : "w-48"}
-        />
-      ) : (
-        <Input
-          aria-label="Order by field path"
-          placeholder="field.path"
-          className={cn(
-            "h-8 font-mono text-xs",
-            stacked ? "w-full" : "w-48"
-          )}
-          value={orderBy.field}
-          onChange={(e) => onChange({ ...orderBy, field: e.target.value })}
-        />
-      )}
+    <div className="grid grid-cols-[minmax(0,1fr)_7rem_2rem] items-center gap-2 @2xl:flex">
+      <FieldPathCombobox
+        aria-label="Order by field path"
+        value={orderBy.field}
+        options={fieldPaths}
+        onChange={(field) => onChange({ ...orderBy, field })}
+        className="w-full @2xl:w-48"
+      />
       <Select
         value={orderBy.dir}
         onValueChange={(v) => onChange({ ...orderBy, dir: v as "asc" | "desc" })}

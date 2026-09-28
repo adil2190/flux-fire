@@ -403,7 +403,6 @@ const FieldRow = memo(function FieldRow({
         value={value}
         onChange={(next) => onChange(name, next)}
         label={name}
-        compact
       />
     </div>
   )

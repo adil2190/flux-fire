@@ -75,6 +75,7 @@ The Firestore browser is a vertical slice with its own conventions — read thes
 
 - shadcn/ui components live in [components/ui/](components/ui/) and are generated via the shadcn CLI (config in [components.json](components.json)). Add new primitives with `npx shadcn@latest add <name>` rather than hand-rolling.
 - `cn()` from [lib/utils.ts](lib/utils.ts) is the standard `clsx + tailwind-merge` helper used everywhere for conditional classes.
+- Firestore read errors render through `<FirestoreErrorNotice error={…}>` ([components/firestore/firestore-error-notice.tsx](components/firestore/firestore-error-notice.tsx)), which picks `PermissionDeniedBanner`, `IndexRequiredBanner`, or a plain message. The banners are separate components in `scope-banner.tsx` (plus `ScopeRequiredBanner` for token/scope errors); don't reintroduce a `variant` prop.
 - Toasts use `sonner` — the `<Toaster />` is mounted once in `Providers` ([components/providers.tsx](components/providers.tsx)). Import `toast` from `sonner` directly, not from a wrapper.
 - Tooltips need `<TooltipProvider>` to be in scope — already mounted in `Providers`, so just use `<Tooltip>` directly.
 - Icons are `lucide-react`.

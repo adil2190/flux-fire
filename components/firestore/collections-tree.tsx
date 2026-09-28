@@ -16,38 +16,33 @@ import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import { joinPath } from "@/lib/firestore/paths"
 
+/** The collapsed collections panel: just a way back to the tree. */
+export function CollectionsRail({ onExpand }: { onExpand: () => void }) {
+  return (
+    <nav aria-label="Collections" className="flex h-full flex-col items-center border-r py-2">
+      <Button
+        variant="ghost"
+        size="icon"
+        className="h-9 w-9"
+        aria-label="Expand collections sidebar"
+        title="Expand collections sidebar"
+        onClick={onExpand}
+      >
+        <PanelLeftOpen className="h-4 w-4" />
+      </Button>
+      <Database aria-hidden className="mt-2 h-4 w-4 text-muted-foreground" />
+    </nav>
+  )
+}
+
 interface Props {
   selectedPath: string
   onSelect: (path: string) => void
-  collapsed: boolean
-  onToggleCollapsed: () => void
+  onCollapse: () => void
 }
 
-export function CollectionsTree({
-  selectedPath,
-  onSelect,
-  collapsed,
-  onToggleCollapsed,
-}: Props) {
+export function CollectionsTree({ selectedPath, onSelect, onCollapse }: Props) {
   const { data: rootCollections, isLoading, error } = useCollectionIds(undefined)
-
-  if (collapsed) {
-    return (
-      <nav aria-label="Collections" className="flex h-full flex-col items-center border-r py-2">
-        <Button
-          variant="ghost"
-          size="icon"
-          className="h-9 w-9"
-          aria-label="Expand collections sidebar"
-          title="Expand collections sidebar"
-          onClick={onToggleCollapsed}
-        >
-          <PanelLeftOpen className="h-4 w-4" />
-        </Button>
-        <Database aria-hidden className="mt-2 h-4 w-4 text-muted-foreground" />
-      </nav>
-    )
-  }
 
   return (
     <nav aria-labelledby="collections-heading" className="flex h-full flex-col border-r">
@@ -62,7 +57,7 @@ export function CollectionsTree({
           className="h-7 w-7 shrink-0"
           aria-label="Collapse collections sidebar"
           title="Collapse collections sidebar"
-          onClick={onToggleCollapsed}
+          onClick={onCollapse}
         >
           <PanelLeftClose className="h-4 w-4" />
         </Button>

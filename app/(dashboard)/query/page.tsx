@@ -7,7 +7,6 @@ import {
   CheckCircle2,
   Copy,
   Database,
-  Download,
   FileSearch,
   Loader2,
   Terminal,
@@ -16,7 +15,9 @@ import { toast } from "sonner"
 import { QueryBuilder } from "@/components/firestore/query-builder"
 import { DocumentsTable } from "@/components/firestore/documents-table"
 import { DocumentInspector } from "@/components/firestore/document-inspector"
-import { ScopeBanner } from "@/components/firestore/scope-banner"
+import { ScopeRequiredBanner } from "@/components/firestore/scope-banner"
+import { FirestoreErrorNotice } from "@/components/firestore/firestore-error-notice"
+import { ExportActions } from "@/components/firestore/export-actions"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -30,8 +31,7 @@ import {
 } from "@/components/ui/sheet"
 import { useFirestoreSession } from "@/hooks/firestore/use-firestore-session"
 import { useRunQuery } from "@/hooks/firestore/use-run-query"
-import { FirestoreError, isPermissionDenied } from "@/lib/firestore/errors"
-import { exportCsv, exportJson, downloadBlob } from "@/lib/firestore/export"
+import { collectFieldPaths } from "@/lib/firestore/fields"
 import { isCollectionPath, splitPath } from "@/lib/firestore/paths"
 import { buildStructuredQuery } from "@/lib/firestore/queries"
 import { useProjectStore } from "@/stores/project-store"
@@ -57,8 +57,8 @@ export default function QueryPage() {
 
   const queryRun = useRunQuery(activeQuery)
   const documents = useMemo(() => queryRun.data ?? [], [queryRun.data])
-  const error = queryRun.error
-  const firestoreError = error instanceof FirestoreError ? error : null
+  // Suggest field paths from the latest results; custom paths still work.
+  const fieldPaths = useMemo(() => collectFieldPaths(documents), [documents])
   const validationError = validateQuery(target, draft)
   const targetError =
     showValidation && validationError?.field === "target"
@@ -125,27 +125,6 @@ export default function QueryPage() {
     setShowValidation(false)
   }
 
-  const downloadResults = (format: "json" | "csv") => {
-    if (exportDocuments.length === 0) return
-    const collection = activeQuery?.collectionId || "query-results"
-    const timestamp = Date.now()
-
-    if (format === "json") {
-      downloadBlob(
-        exportJson(exportDocuments),
-        `${collection}-${timestamp}.json`,
-        "application/json"
-      )
-      return
-    }
-
-    downloadBlob(
-      exportCsv(exportDocuments),
-      `${collection}-${timestamp}.csv`,
-      "text/csv"
-    )
-  }
-
   if (!selectedProject) {
     return (
       <div className="flex h-full items-center justify-center text-center">
@@ -163,7 +142,7 @@ export default function QueryPage() {
   if (session.scopeError) {
     return (
       <div className="p-6">
-        <ScopeBanner />
+        <ScopeRequiredBanner />
       </div>
     )
   }
@@ -249,7 +228,7 @@ export default function QueryPage() {
             onRun={runQuery}
             onReset={resetQuery}
             isRunning={queryRun.isFetching}
-            layout="stacked"
+            fieldPaths={fieldPaths}
           />
           {queryError && (
             <p role="alert" className="border-b bg-card px-4 py-2 text-xs text-destructive">
@@ -328,73 +307,14 @@ export default function QueryPage() {
                   {selection.size} selected
                 </Badge>
               )}
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-7 gap-1 text-xs"
-                disabled={exportDocuments.length === 0}
-                onClick={async () => {
-                  await navigator.clipboard.writeText(
-                    exportDocuments.map((document) => document.id).join("\n")
-                  )
-                  toast.success(
-                    `Copied ${exportDocuments.length} document ${
-                      exportDocuments.length === 1 ? "ID" : "IDs"
-                    }`
-                  )
-                }}
-              >
-                <Copy className="h-3.5 w-3.5" /> Copy IDs
-              </Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-7 gap-1 text-xs"
-                disabled={exportDocuments.length === 0}
-                onClick={() => downloadResults("json")}
-              >
-                <Download className="h-3.5 w-3.5" /> Export JSON
-              </Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-7 gap-1 text-xs"
-                disabled={exportDocuments.length === 0}
-                onClick={() => downloadResults("csv")}
-              >
-                <Download className="h-3.5 w-3.5" /> Export CSV
-              </Button>
+              <ExportActions
+                documents={exportDocuments}
+                filenameBase={activeQuery?.collectionId || "query-results"}
+              />
             </div>
           </div>
 
-          {firestoreError && isPermissionDenied(firestoreError) && (
-            <div className="border-b p-3">
-              <ScopeBanner
-                variant="permission"
-                message={firestoreError.message}
-              />
-            </div>
-          )}
-          {firestoreError?.indexUrl && (
-            <div className="border-b p-3">
-              <ScopeBanner
-                variant="index"
-                indexUrl={firestoreError.indexUrl}
-              />
-            </div>
-          )}
-          {firestoreError &&
-            !isPermissionDenied(firestoreError) &&
-            !firestoreError.indexUrl && (
-              <div className="border-b bg-destructive/10 px-4 py-3 text-xs text-destructive">
-                {firestoreError.message}
-              </div>
-            )}
-          {error && !firestoreError && (
-            <div className="border-b bg-destructive/10 px-4 py-3 text-xs text-destructive">
-              {error instanceof Error ? error.message : "Query failed"}
-            </div>
-          )}
+          <FirestoreErrorNotice error={queryRun.error} />
 
           {!activeQuery ? (
             <div className="flex flex-1 items-center justify-center p-8 text-center">

@@ -23,6 +23,7 @@ interface Props {
   options: string[]
   onChange: (value: string) => void
   className?: string
+  "aria-label"?: string
 }
 
 export function FieldPathCombobox({
@@ -30,6 +31,7 @@ export function FieldPathCombobox({
   options,
   onChange,
   className,
+  "aria-label": ariaLabel = "Choose field path",
 }: Props) {
   const [open, setOpen] = useState(false)
   const [search, setSearch] = useState("")
@@ -66,7 +68,7 @@ export function FieldPathCombobox({
           type="button"
           variant="outline"
           role="combobox"
-          aria-label="Choose field path"
+          aria-label={ariaLabel}
           aria-expanded={open}
           className={cn(
             "h-8 justify-between px-3 font-mono text-xs font-normal",

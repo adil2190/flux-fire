@@ -17,7 +17,6 @@ import type { FieldKind, FieldValue } from "@/types/firestore"
 interface Props {
   value: FieldValue
   onChange: (next: FieldValue) => void
-  compact?: boolean
   /** Names the value for assistive tech, e.g. the field name or "Item 2". */
   label?: string
 }
@@ -36,7 +35,7 @@ const KIND_OPTIONS: { value: FieldKind; label: string }[] = [
   { value: "bytes", label: "bytes (base64)" },
 ]
 
-export function FieldEditor({ value, onChange, compact, label = "Field" }: Props) {
+export function FieldEditor({ value, onChange, label = "Field" }: Props) {
   return (
     <div className="flex w-full flex-col gap-2">
       <div className="flex items-center gap-2">
@@ -56,7 +55,7 @@ export function FieldEditor({ value, onChange, compact, label = "Field" }: Props
           </SelectContent>
         </Select>
         <div className="min-w-0 flex-1">
-          <ScalarEditor value={value} onChange={onChange} compact={compact} label={label} />
+          <ScalarEditor value={value} onChange={onChange} label={label} />
         </div>
       </div>
       {(value.kind === "array" || value.kind === "map") && (
@@ -66,20 +65,13 @@ export function FieldEditor({ value, onChange, compact, label = "Field" }: Props
   )
 }
 
-function ScalarEditor({ value, onChange, compact, label = "Field" }: Props) {
+function ScalarEditor({ value, onChange, label = "Field" }: Props) {
   const valueLabel = `${label} value`
   switch (value.kind) {
     case "string":
-      return compact ? (
+      return (
         <Input
           className="h-8 text-xs"
-          aria-label={valueLabel}
-          value={value.value}
-          onChange={(e) => onChange({ kind: "string", value: e.target.value })}
-        />
-      ) : (
-        <Textarea
-          className="min-h-[60px] text-xs"
           aria-label={valueLabel}
           value={value.value}
           onChange={(e) => onChange({ kind: "string", value: e.target.value })}
@@ -214,7 +206,6 @@ function ContainerEditor({ value, onChange, label = "Field" }: Props) {
                   onChange({ kind: "array", value: arr })
                 }}
                 label={`${label} item ${idx}`}
-                compact
               />
             </div>
             <Button
@@ -279,7 +270,6 @@ function ContainerEditor({ value, onChange, label = "Field" }: Props) {
                   })
                 }}
                 label={`${label}.${key}`}
-                compact
               />
             </div>
             <Button

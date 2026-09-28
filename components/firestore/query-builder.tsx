@@ -16,7 +16,7 @@ import { Label } from "@/components/ui/label"
 import { Badge } from "@/components/ui/badge"
 import { FieldEditor } from "./field-editor"
 import { FieldPathCombobox } from "./field-path-combobox"
-import { isUnaryOp, inequalityFields } from "@/lib/firestore/queries"
+import { isUnaryOp, inequalityFields, MAX_QUERY_LIMIT } from "@/lib/firestore/queries"
 import { cn } from "@/lib/utils"
 import type { FilterOp, OrderBy, QueryFilter, QueryState } from "@/types/firestore"
 
@@ -219,13 +219,21 @@ export function QueryBuilder({
             <Input
               id={limitId}
               type="number"
-              min={0}
+              min={1}
+              max={MAX_QUERY_LIMIT}
+              aria-describedby={`${limitId}-hint`}
               className="h-7 w-24 text-xs"
-              value={state.limit}
+              value={state.limit || ""}
               onChange={(e) =>
-                onChange({ ...state, limit: Math.max(0, Number(e.target.value)) })
+                onChange({
+                  ...state,
+                  limit: Math.min(MAX_QUERY_LIMIT, Math.max(0, Number(e.target.value))),
+                })
               }
             />
+            <span id={`${limitId}-hint`} className="text-2xs text-muted-foreground">
+              Max {MAX_QUERY_LIMIT.toLocaleString("en-US")}
+            </span>
           </div>
 
           {orderByMismatch && (

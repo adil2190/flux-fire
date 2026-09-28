@@ -17,32 +17,33 @@ interface FirestoreSession {
 export function useFirestoreSession(): FirestoreSession {
   const { data: session, status } = useSession()
   const qc = useQueryClient()
-  const selectedProject = useProjectStore((s) => s.selectedProject)
-  const useEmulator = useProjectStore((s) => s.useEmulator)
-  const emulatorPorts = useProjectStore((s) => s.emulatorPorts)
+  const projectId = useProjectStore((s) => s.selectedProject?.projectId)
+
+  // next-auth replaces the session object on every refetch (e.g. each window
+  // focus), so memoize on the fields we use to keep the client stable.
+  const hasSession = !!session
+  const tokenError = session?.error === "RefreshAccessTokenError"
+  const accessToken = session?.accessToken
 
   return useMemo<FirestoreSession>(() => {
     if (status === "loading") return { client: null, ready: false, scopeError: false }
-    if (!session) return { client: null, ready: false, reason: "no-session", scopeError: false }
-    if (session.error === "RefreshAccessTokenError") {
+    if (!hasSession) return { client: null, ready: false, reason: "no-session", scopeError: false }
+    if (tokenError) {
       return { client: null, ready: false, reason: "token-error", scopeError: true }
     }
-    if (!session.accessToken) {
+    if (!accessToken) {
       return { client: null, ready: false, reason: "no-token", scopeError: false }
     }
-    if (!selectedProject) {
+    if (!projectId) {
       return { client: null, ready: false, reason: "no-project", scopeError: false }
     }
 
     const client = createFirestoreClient({
-      token: session.accessToken,
-      projectId: selectedProject.projectId,
-      emulator: useEmulator
-        ? { host: "localhost", port: emulatorPorts.firestore }
-        : undefined,
+      token: accessToken,
+      projectId,
       onPermissionDenied: () => {
         void qc.invalidateQueries({
-          queryKey: ["firebase-project-access", selectedProject.projectId],
+          queryKey: ["firebase-project-access", projectId],
         })
       },
     })
@@ -50,15 +51,8 @@ export function useFirestoreSession(): FirestoreSession {
     return {
       client,
       ready: true,
-      projectId: selectedProject.projectId,
+      projectId,
       scopeError: false,
     }
-  }, [
-    session,
-    status,
-    selectedProject,
-    useEmulator,
-    emulatorPorts.firestore,
-    qc,
-  ])
+  }, [status, hasSession, tokenError, accessToken, projectId, qc])
 }

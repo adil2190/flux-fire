@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useId, useMemo, useState } from "react"
+import { memo, useCallback, useEffect, useId, useMemo, useReducer, useRef, useState } from "react"
 import { Loader2, Save, Trash2, X, Plus, ChevronRight } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -34,12 +34,71 @@ interface DraftState {
   baseUpdateTime?: string
 }
 
-// Unsaved edits survive switching documents or closing the inspector, keyed by
-// project + document path. Entries are dropped on save, discard, or delete.
+// Unsaved edits survive switching documents, closing the inspector, or hiding
+// the tab, keyed by project + document path. Entries are dropped on save,
+// discard, or delete.
 const draftCache = new Map<string, DraftState>()
+
+// One listener for the whole app: warn before unload while any draft is
+// unsaved, including drafts in hidden tabs whose effects are paused.
+if (typeof window !== "undefined") {
+  window.addEventListener("beforeunload", (event) => {
+    if (draftCache.size > 0) event.preventDefault()
+  })
+}
 
 function freshDraft(doc: FirestoreDocument): DraftState {
   return { draft: doc.fields, dirty: [], baseUpdateTime: doc.updateTime }
+}
+
+type DraftAction =
+  | { type: "change"; name: string; value: FieldValue }
+  | { type: "rename"; from: string; to: string }
+  | { type: "delete"; name: string }
+  | { type: "add" }
+  | { type: "saved" }
+  | { type: "reset"; state: DraftState }
+
+function withDirty(state: DraftState, ...names: string[]): string[] {
+  return Array.from(new Set([...state.dirty, ...names]))
+}
+
+function draftReducer(state: DraftState, action: DraftAction): DraftState {
+  switch (action.type) {
+    case "change":
+      return {
+        ...state,
+        draft: { ...state.draft, [action.name]: action.value },
+        dirty: withDirty(state, action.name),
+      }
+    case "rename": {
+      const { [action.from]: value, ...rest } = state.draft
+      return {
+        ...state,
+        draft: { ...rest, [action.to]: value },
+        dirty: withDirty(state, action.from, action.to),
+      }
+    }
+    case "delete": {
+      const rest = { ...state.draft }
+      delete rest[action.name]
+      return { ...state, draft: rest, dirty: withDirty(state, action.name) }
+    }
+    case "add": {
+      let i = 1
+      let name = "newField"
+      while (name in state.draft) name = `newField${i++}`
+      return {
+        ...state,
+        draft: { ...state.draft, [name]: defaultFieldValue("string") },
+        dirty: withDirty(state, name),
+      }
+    }
+    case "saved":
+      return { ...state, dirty: [] }
+    case "reset":
+      return action.state
+  }
 }
 
 export function DocumentInspector({ docPath, onClose, onNavigate, onDeleted }: Props) {
@@ -98,8 +157,10 @@ interface DocumentEditorProps {
 function DocumentEditor({ doc, cacheKey, onClose, onNavigate, onDeleted }: DocumentEditorProps) {
   const writeDoc = useWriteDocument()
   const deleteDoc = useDeleteDocument()
-  const [state, setState] = useState<DraftState>(
-    () => draftCache.get(cacheKey) ?? freshDraft(doc)
+  const [state, dispatch] = useReducer(
+    draftReducer,
+    cacheKey,
+    (key) => draftCache.get(key) ?? freshDraft(doc)
   )
   const [confirmDelete, setConfirmDelete] = useState(false)
   const { draft } = state
@@ -109,32 +170,43 @@ function DocumentEditor({ doc, cacheKey, onClose, onNavigate, onDeleted }: Docum
   // Pick up server changes (after a save, or someone else's write) only while
   // there are no local edits, so a refetch never wipes unsaved work.
   if (!isDirty && state.baseUpdateTime !== doc.updateTime) {
-    setState(freshDraft(doc))
+    dispatch({ type: "reset", state: freshDraft(doc) })
   }
 
   useEffect(() => {
-    if (!isDirty) return
-    const warn = (event: BeforeUnloadEvent) => event.preventDefault()
-    window.addEventListener("beforeunload", warn)
-    return () => window.removeEventListener("beforeunload", warn)
-  }, [isDirty])
+    if (state.dirty.length > 0) draftCache.set(cacheKey, state)
+    else draftCache.delete(cacheKey)
+  }, [cacheKey, state])
+
+  // Lets the stable rename handler validate against the latest draft.
+  const draftRef = useRef(draft)
+  useEffect(() => {
+    draftRef.current = draft
+  }, [draft])
 
   const fieldNames = useMemo(() => Object.keys(draft).sort(), [draft])
 
-  const update = (nextDraft: Record<string, FieldValue>, nextDirty: Set<string>) => {
-    const next = {
-      draft: nextDraft,
-      dirty: Array.from(nextDirty),
-      baseUpdateTime: state.baseUpdateTime,
+  const changeField = useCallback(
+    (name: string, value: FieldValue) => dispatch({ type: "change", name, value }),
+    []
+  )
+  const deleteField = useCallback(
+    (name: string) => dispatch({ type: "delete", name }),
+    []
+  )
+  const renameField = useCallback((from: string, to: string): string | null => {
+    if (to === from) return null
+    if (!to) return "Enter a field name."
+    if (to in draftRef.current) {
+      return `A field named “${to}” already exists. Choose another name.`
     }
-    setState(next)
-    if (next.dirty.length > 0) draftCache.set(cacheKey, next)
-    else draftCache.delete(cacheKey)
-  }
+    dispatch({ type: "rename", from, to })
+    return null
+  }, [])
 
   const discard = () => {
     draftCache.delete(cacheKey)
-    setState(freshDraft(doc))
+    dispatch({ type: "reset", state: freshDraft(doc) })
   }
 
   const save = async () => {
@@ -146,7 +218,7 @@ function DocumentEditor({ doc, cacheKey, onClose, onNavigate, onDeleted }: Docum
         updateMask: Array.from(dirty),
       })
       toast.success("Changes saved")
-      update(draft, new Set())
+      dispatch({ type: "saved" })
     } catch (err) {
       toast.error(
         err instanceof FirestoreError ? err.message : "Unable to save changes. Try again.",
@@ -189,39 +261,16 @@ function DocumentEditor({ doc, cacheKey, onClose, onNavigate, onDeleted }: Docum
                   name={name}
                   value={draft[name]}
                   dirty={dirty.has(name)}
-                  onChange={(next) => {
-                    update({ ...draft, [name]: next }, new Set([...dirty, name]))
-                  }}
-                  onRename={(newName) => {
-                    if (newName === name) return null
-                    if (!newName) return "Enter a field name."
-                    if (newName in draft) {
-                      return `A field named “${newName}” already exists. Choose another name.`
-                    }
-                    const { [name]: val, ...rest } = draft
-                    update({ ...rest, [newName]: val }, new Set([...dirty, name, newName]))
-                    return null
-                  }}
-                  onDelete={() => {
-                    const rest = { ...draft }
-                    delete rest[name]
-                    update(rest, new Set([...dirty, name]))
-                  }}
+                  onChange={changeField}
+                  onRename={renameField}
+                  onDelete={deleteField}
                 />
               ))}
               <Button
                 variant="outline"
                 size="sm"
                 className="h-7 gap-1 text-xs"
-                onClick={() => {
-                  let i = 1
-                  let name = "newField"
-                  while (name in draft) name = `newField${i++}`
-                  update(
-                    { ...draft, [name]: defaultFieldValue("string") },
-                    new Set([...dirty, name])
-                  )
-                }}
+                onClick={() => dispatch({ type: "add" })}
               >
                 <Plus className="h-3.5 w-3.5" /> Add field
               </Button>
@@ -233,9 +282,7 @@ function DocumentEditor({ doc, cacheKey, onClose, onNavigate, onDeleted }: Docum
         </TabsContent>
 
         <TabsContent value="raw" className="flex-1 overflow-auto">
-          <pre className="p-3 font-mono text-2xs">
-            {JSON.stringify(plainFields(draft), null, 2)}
-          </pre>
+          <RawJson fields={draft} />
         </TabsContent>
       </Tabs>
 
@@ -294,13 +341,21 @@ interface FieldRowProps {
   name: string
   value: FieldValue
   dirty: boolean
-  onChange: (next: FieldValue) => void
+  onChange: (name: string, next: FieldValue) => void
   /** Returns an error message when the rename is rejected. */
-  onRename: (next: string) => string | null
-  onDelete: () => void
+  onRename: (name: string, next: string) => string | null
+  onDelete: (name: string) => void
 }
 
-function FieldRow({ name, value, dirty, onChange, onRename, onDelete }: FieldRowProps) {
+// Memoized with name-keyed handlers, so editing one field re-renders one row.
+const FieldRow = memo(function FieldRow({
+  name,
+  value,
+  dirty,
+  onChange,
+  onRename,
+  onDelete,
+}: FieldRowProps) {
   const [localName, setLocalName] = useState(name)
   const [renameError, setRenameError] = useState<string | null>(null)
   const errorId = useId()
@@ -322,7 +377,7 @@ function FieldRow({ name, value, dirty, onChange, onRename, onDelete }: FieldRow
             setLocalName(e.target.value)
             setRenameError(null)
           }}
-          onBlur={() => setRenameError(onRename(localName.trim()))}
+          onBlur={() => setRenameError(onRename(name, localName.trim()))}
         />
         {dirty && (
           <Badge variant="outline" className="text-2xs">
@@ -334,7 +389,7 @@ function FieldRow({ name, value, dirty, onChange, onRename, onDelete }: FieldRow
           size="icon"
           className="h-7 w-7"
           aria-label={`Delete field ${name}`}
-          onClick={onDelete}
+          onClick={() => onDelete(name)}
         >
           <Trash2 className="h-3.5 w-3.5" />
         </Button>
@@ -344,9 +399,21 @@ function FieldRow({ name, value, dirty, onChange, onRename, onDelete }: FieldRow
           {renameError}
         </p>
       )}
-      <FieldEditor value={value} onChange={onChange} label={name} compact />
+      <FieldEditor
+        value={value}
+        onChange={(next) => onChange(name, next)}
+        label={name}
+        compact
+      />
     </div>
   )
+})
+
+// A component, not inline JSX, so the document is only stringified while the
+// Raw JSON tab is open (inactive tab content isn't mounted).
+function RawJson({ fields }: { fields: Record<string, FieldValue> }) {
+  const json = useMemo(() => JSON.stringify(plainFields(fields), null, 2), [fields])
+  return <pre className="p-3 font-mono text-2xs">{json}</pre>
 }
 
 function InspectorHeader({

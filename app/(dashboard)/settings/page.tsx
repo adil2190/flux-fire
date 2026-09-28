@@ -1,20 +1,12 @@
 "use client"
 
-import { useState } from "react"
-import { Zap, Moon, Sun, Monitor } from "lucide-react"
+import { Moon, Sun, Monitor } from "lucide-react"
 import { useTheme } from "next-themes"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
-import { Switch } from "@/components/ui/switch"
-import { Separator } from "@/components/ui/separator"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { useProjectStore } from "@/stores/project-store"
 
 export default function SettingsPage() {
   const { theme, setTheme } = useTheme()
-  const { useEmulator, emulatorPorts, toggleEmulator, setEmulatorPorts } =
-    useProjectStore()
 
   return (
     <div className="flex h-full flex-col overflow-auto p-6">
@@ -26,58 +18,6 @@ export default function SettingsPage() {
       </div>
 
       <div className="max-w-2xl space-y-6">
-        {/* Emulator Settings */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Zap className="h-5 w-5" />
-              Firebase emulators
-            </CardTitle>
-            <CardDescription>
-              Connect to local Firebase emulators for development
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="flex items-center justify-between">
-              <div className="space-y-0.5">
-                <Label htmlFor="emulator-toggle">Use emulators</Label>
-                <p className="text-sm text-muted-foreground">
-                  Connect to local emulators instead of production
-                </p>
-              </div>
-              <Switch
-                id="emulator-toggle"
-                checked={useEmulator}
-                onCheckedChange={toggleEmulator}
-              />
-            </div>
-
-            {useEmulator && (
-              <>
-                <Separator />
-                <div className="grid gap-4 sm:grid-cols-2">
-                  <div className="space-y-2">
-                    <Label htmlFor="firestore-port">Firestore port</Label>
-                    <PortInput
-                      id="firestore-port"
-                      value={emulatorPorts.firestore}
-                      onCommit={(firestore) => setEmulatorPorts({ firestore })}
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="auth-port">Auth port</Label>
-                    <PortInput
-                      id="auth-port"
-                      value={emulatorPorts.auth}
-                      onCommit={(auth) => setEmulatorPorts({ auth })}
-                    />
-                  </div>
-                </div>
-              </>
-            )}
-          </CardContent>
-        </Card>
-
         {/* Appearance */}
         <Card>
           <CardHeader>
@@ -120,53 +60,5 @@ export default function SettingsPage() {
         </Card>
       </div>
     </div>
-  )
-}
-
-function parsePort(text: string): number | null {
-  if (!/^\d+$/.test(text)) return null
-  const port = Number(text)
-  return port >= 1 && port <= 65535 ? port : null
-}
-
-// Keeps its own text so the field can be cleared and retyped; only valid
-// ports are saved, and an invalid entry reverts to the saved port on blur.
-function PortInput({
-  id,
-  value,
-  onCommit,
-}: {
-  id: string
-  value: number
-  onCommit: (port: number) => void
-}) {
-  const [text, setText] = useState(String(value))
-  const invalid = text !== "" && parsePort(text) === null
-  const hintId = `${id}-hint`
-
-  return (
-    <>
-      <Input
-        id={id}
-        inputMode="numeric"
-        autoComplete="off"
-        value={text}
-        aria-invalid={invalid}
-        aria-describedby={invalid ? hintId : undefined}
-        onChange={(e) => {
-          setText(e.target.value)
-          const port = parsePort(e.target.value)
-          if (port !== null) onCommit(port)
-        }}
-        onBlur={() => {
-          if (parsePort(text) === null) setText(String(value))
-        }}
-      />
-      {invalid && (
-        <p id={hintId} className="text-xs text-destructive">
-          Use a port number from 1 to 65535.
-        </p>
-      )}
-    </>
   )
 }

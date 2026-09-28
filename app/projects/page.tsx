@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
 import { useSession, signOut } from "next-auth/react"
 import { toast } from "sonner"
@@ -23,7 +23,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
-import { useProjects, useProjectConfig } from "@/hooks/use-projects"
+import { useProjects, projectConfigQueryOptions } from "@/hooks/use-projects"
 import { useQueryClient } from "@tanstack/react-query"
 import { useProjectStore } from "@/stores/project-store"
 import type { FirebaseProject } from "@/types/project"
@@ -33,13 +33,12 @@ export default function ProjectsPage() {
   const qc = useQueryClient()
   const { data: session } = useSession()
   const [search, setSearch] = useState("")
-  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null)
+  const [connectingId, setConnectingId] = useState<string | null>(null)
 
   const { data, isLoading, error, refetch, isFetching } = useProjects()
-  const { data: configData, isLoading: configLoading } = useProjectConfig(
-    selectedProjectId ?? undefined
-  )
-  const { setSelectedProject, setFirebaseConfig, disconnect } = useProjectStore()
+  const setSelectedProject = useProjectStore((s) => s.setSelectedProject)
+  const setFirebaseConfig = useProjectStore((s) => s.setFirebaseConfig)
+  const disconnect = useProjectStore((s) => s.disconnect)
 
   const handleSignOut = () => {
     qc.removeQueries({ queryKey: ["firestore"] })
@@ -58,18 +57,23 @@ export default function ProjectsPage() {
   )
 
   const handleSelectProject = async (project: FirebaseProject) => {
-    setSelectedProjectId(project.projectId)
+    if (connectingId) return
+    setConnectingId(project.projectId)
+    try {
+      const { config } = await qc.fetchQuery(
+        projectConfigQueryOptions(project.projectId)
+      )
+      setSelectedProject(project)
+      setFirebaseConfig(config)
+      toast.success(`Connected to ${project.displayName}`)
+      router.push("/firestore")
+    } catch {
+      setConnectingId(null)
+      toast.error(`Unable to connect to ${project.displayName}. Try again.`, {
+        duration: Infinity,
+      })
+    }
   }
-
-  useEffect(() => {
-    if (!configData?.config || !selectedProjectId) return
-    const project = projects.find((p) => p.projectId === selectedProjectId)
-    if (!project) return
-    setSelectedProject(project)
-    setFirebaseConfig(configData.config)
-    toast.success(`Connected to ${project.displayName}`)
-    router.push("/firestore")
-  }, [configData, selectedProjectId, projects, setSelectedProject, setFirebaseConfig, router])
 
   const userInitials = session?.user?.name
     ?.split(" ")
@@ -199,7 +203,7 @@ export default function ProjectsPage() {
                           type="button"
                           className="max-w-full truncate text-left outline-none after:absolute after:inset-0 after:rounded-xl"
                           title={project.displayName}
-                          aria-busy={configLoading && selectedProjectId === project.projectId}
+                          aria-busy={connectingId === project.projectId}
                           onClick={() => handleSelectProject(project)}
                         >
                           {project.displayName}
@@ -218,7 +222,7 @@ export default function ProjectsPage() {
                         </p>
                       )}
                     </div>
-                    {configLoading && selectedProjectId === project.projectId && (
+                    {connectingId === project.projectId && (
                       <Loader2 className="h-5 w-5 animate-spin text-primary" />
                     )}
                   </div>

@@ -10,7 +10,6 @@ import {
   Users,
   Terminal,
   Settings,
-  Zap,
   LogOut,
   Flame,
   ChevronDown,
@@ -20,8 +19,6 @@ import {
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
-import { Switch } from "@/components/ui/switch"
-import { Label } from "@/components/ui/label"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import {
   DropdownMenu,
@@ -46,8 +43,8 @@ export function Sidebar() {
   const qc = useQueryClient()
   const { data: session } = useSession()
   const [collapsed, setCollapsed] = useState(false)
-  const { selectedProject, useEmulator, toggleEmulator, disconnect } =
-    useProjectStore()
+  const selectedProject = useProjectStore((s) => s.selectedProject)
+  const disconnect = useProjectStore((s) => s.disconnect)
 
   const handleDisconnect = () => {
     if (selectedProject) {
@@ -122,9 +119,14 @@ export function Sidebar() {
                     >
                       {selectedProject?.displayName || "Fluxfire"}
                     </span>
-                    <span className="block text-xs text-muted-foreground">
-                      {useEmulator ? "Emulator" : "Production"}
-                    </span>
+                    {selectedProject && (
+                      <span
+                        className="block truncate text-xs text-muted-foreground"
+                        title={selectedProject.projectId}
+                      >
+                        {selectedProject.projectId}
+                      </span>
+                    )}
                   </span>
                   <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
                 </span>
@@ -186,77 +188,6 @@ export function Sidebar() {
           )
         })}
       </nav>
-
-      <Separator />
-
-      {/* Emulator Toggle */}
-      <div className={cn("p-4", collapsed && "p-2")}>
-        {collapsed ? (
-          <div className="flex flex-col items-center gap-0.5">
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              className="h-9 w-9"
-              aria-label="Emulator"
-              aria-pressed={useEmulator}
-              title={
-                useEmulator
-                  ? "Using local emulators. Click to switch to production."
-                  : "Using production. Click to switch to local emulators."
-              }
-              onClick={toggleEmulator}
-            >
-              <Zap
-                className={cn(
-                  "h-4 w-4",
-                  useEmulator
-                    ? "text-amber-600 dark:text-amber-400"
-                    : "text-muted-foreground"
-                )}
-              />
-            </Button>
-            {/* Visible environment label: the icon color alone isn't enough. */}
-            <span
-              aria-hidden
-              className={cn(
-                "text-2xs font-medium",
-                useEmulator
-                  ? "text-amber-700 dark:text-amber-400"
-                  : "text-muted-foreground"
-              )}
-            >
-              {useEmulator ? "Emu" : "Prod"}
-            </span>
-          </div>
-        ) : (
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Zap
-                className={cn(
-                  "h-4 w-4",
-                  useEmulator
-                    ? "text-amber-600 dark:text-amber-400"
-                    : "text-muted-foreground"
-                )}
-              />
-              <Label htmlFor="emulator-sidebar" className="text-sm font-medium">
-                Emulator
-              </Label>
-            </div>
-            <Switch
-              id="emulator-sidebar"
-              checked={useEmulator}
-              onCheckedChange={toggleEmulator}
-            />
-          </div>
-        )}
-        {!collapsed && useEmulator && (
-          <p className="mt-1 text-xs text-muted-foreground">
-            Connected to local emulators
-          </p>
-        )}
-      </div>
 
       <Separator />
 

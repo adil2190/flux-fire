@@ -4,7 +4,7 @@ import { Users } from "lucide-react"
 import { useProjectStore } from "@/stores/project-store"
 
 export default function AuthPage() {
-  const { selectedProject } = useProjectStore()
+  const selectedProject = useProjectStore((s) => s.selectedProject)
 
   return (
     <div className="flex h-full flex-col overflow-auto p-6">

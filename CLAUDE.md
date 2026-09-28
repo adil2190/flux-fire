@@ -50,18 +50,18 @@ Any new scope must be added to `authorization.params.scope` in `lib/auth.ts` and
 
 Two layers, do not conflate them:
 
-- [stores/project-store.ts](stores/project-store.ts) — Zustand store persisted to `localStorage` under key `fluxfire-project`. Holds the **selected project**, its resolved Firebase web config, and emulator settings (`useEmulator`, `emulatorPorts.firestore`, `emulatorPorts.auth`). Dashboard pages read from here; if `selectedProject` or `firebaseConfig` is null, they show an empty state and expect the user to go through `/projects`.
-- [hooks/use-projects.ts](hooks/use-projects.ts) — TanStack Query hooks (`useProjects`, `useProjectConfig`) that hit the API routes above. Query defaults are configured in [components/providers.tsx](components/providers.tsx): `staleTime` 1m, `gcTime` 5m, `refetchOnWindowFocus: false`, query retry 1, mutation retry 0.
+- [stores/project-store.ts](stores/project-store.ts) — Zustand store persisted to `localStorage` under key `fluxfire-project`. Holds the **selected project** and its resolved Firebase web config (persist `version` 1, with `partialize` so only those two fields are stored). Dashboard pages read from here; if `selectedProject` or `firebaseConfig` is null, they show an empty state and expect the user to go through `/projects`.
+- [hooks/use-projects.ts](hooks/use-projects.ts) — TanStack Query hooks (`useProjects`, `useProjectAccess`) and `projectConfigQueryOptions` for the API routes above. Query defaults are configured in [components/providers.tsx](components/providers.tsx): `staleTime` 1m, `gcTime` 5m, `refetchOnWindowFocus: false`, query retry 1, mutation retry 0.
 
-The flow on `/projects`: user clicks a card → `selectedProjectId` triggers `useProjectConfig` → on success, both project and config are written into the Zustand store and the user is pushed to `/firestore`.
+The flow on `/projects`: the card's click handler awaits `qc.fetchQuery(projectConfigQueryOptions(id))`, then writes project and config into the Zustand store and pushes to `/firestore` (no effect involved).
 
 ### Firestore REST data plane
 
 The Firestore browser is a vertical slice with its own conventions — read these before adding features there.
 
-- **Transport:** all Firestore reads/writes go from the browser directly to `firestore.googleapis.com/v1/projects/{p}/databases/(default)/documents`, using `session.accessToken` as a bearer. The emulator URL substitutes `http://localhost:{port}`. Only the `(default)` database is supported (the constant lives in [lib/firestore/client.ts](lib/firestore/client.ts) and can be parameterized later).
+- **Transport:** all Firestore reads/writes go from the browser directly to `firestore.googleapis.com/v1/projects/{p}/databases/(default)/documents`, using `session.accessToken` as a bearer. There is no emulator mode. Only the `(default)` database is supported (the constant lives in [lib/firestore/client.ts](lib/firestore/client.ts) and can be parameterized later).
 - **Module layout** (each is small and single-responsibility — keep it that way):
-  - [lib/firestore/client.ts](lib/firestore/client.ts) — fetch wrapper. Built once per render via [hooks/firestore/use-firestore-session.ts](hooks/firestore/use-firestore-session.ts), which reads token + projectId + emulator settings.
+  - [lib/firestore/client.ts](lib/firestore/client.ts) — fetch wrapper. Built once per render via [hooks/firestore/use-firestore-session.ts](hooks/firestore/use-firestore-session.ts), which reads token + projectId and memoizes on those primitives (next-auth replaces the session object on every refetch).
   - [lib/firestore/encoding.ts](lib/firestore/encoding.ts) — REST `Value` ↔ `FieldValue` discriminated union ([types/firestore.ts](types/firestore.ts)). Integers are kept as **strings** to avoid 53-bit truncation; respect this when adding editors.
   - [lib/firestore/paths.ts](lib/firestore/paths.ts) — collection vs doc detection (odd vs even segment count), parent walks, URL encoding per segment.
   - [lib/firestore/queries.ts](lib/firestore/queries.ts) — `QueryState` → `structuredQuery` body. `effectiveOrderBy` injects `__name__ asc` when none is specified (required for stable cursor pagination).

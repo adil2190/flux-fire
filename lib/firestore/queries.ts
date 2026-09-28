@@ -55,6 +55,16 @@ export interface StructuredQueryBody {
   }
 }
 
+/**
+ * Results render as plain table rows, so cap every query; an empty or zero
+ * limit means "as many as allowed", not "unlimited".
+ */
+export const MAX_QUERY_LIMIT = 1000
+
+export function clampQueryLimit(limit: number): number {
+  return limit > 0 ? Math.min(Math.floor(limit), MAX_QUERY_LIMIT) : MAX_QUERY_LIMIT
+}
+
 export function buildStructuredQuery(state: QueryState): StructuredQueryBody {
   const filters = state.filters.map(filterToWire).filter(Boolean) as StructuredQueryFilter[]
 
@@ -79,7 +89,7 @@ export function buildStructuredQuery(state: QueryState): StructuredQueryBody {
       from: [{ collectionId: state.collectionId, allDescendants: state.allDescendants || undefined }],
       where,
       orderBy,
-      limit: state.limit > 0 ? state.limit : undefined,
+      limit: clampQueryLimit(state.limit),
       startAt,
     },
   }

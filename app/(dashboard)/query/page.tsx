@@ -42,7 +42,6 @@ const DEFAULT_LIMIT = 50
 export default function QueryPage() {
   const router = useRouter()
   const selectedProject = useProjectStore((state) => state.selectedProject)
-  const useEmulator = useProjectStore((state) => state.useEmulator)
   const session = useFirestoreSession()
   const [target, setTarget] = useState("")
   const [draft, setDraft] = useState<QueryState>(emptyQueryState)
@@ -181,14 +180,13 @@ export default function QueryPage() {
             Build and run structured Firestore queries against {selectedProject.displayName}
           </p>
         </div>
-        <div className="flex items-center gap-2">
-          <Badge variant="outline" className="max-w-52 truncate font-mono">
-            {selectedProject.projectId}
-          </Badge>
-          <Badge variant={useEmulator ? "secondary" : "outline"}>
-            {useEmulator ? "Emulator" : "Production"}
-          </Badge>
-        </div>
+        <Badge
+          variant="outline"
+          className="max-w-52 truncate font-mono"
+          title={selectedProject.projectId}
+        >
+          {selectedProject.projectId}
+        </Badge>
       </header>
 
       <div className="grid min-h-0 flex-1 grid-cols-[min(440px,50%)_minmax(0,1fr)] overflow-hidden">

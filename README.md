@@ -5,7 +5,7 @@ Fluxfire is a lightweight Firebase administration panel built with Next.js. It l
 Fluxfire does not have an application database and does not ask for a Firebase service-account key. Google OAuth provides the user's access token, the Firebase Management API supplies project metadata, and the Firestore REST API is the data plane.
 
 > [!WARNING]
-> Fluxfire can write to and delete production Firestore data. The emulator switch is off by default. Always confirm the environment shown in the sidebar before making changes.
+> Fluxfire writes to and deletes live Firestore data. There is no emulator mode. Always confirm the project shown in the sidebar before making changes.
 
 ## Contents
 
@@ -22,7 +22,6 @@ Fluxfire does not have an application database and does not ask for a Firebase s
 - [Routes and API endpoints](#routes-and-api-endpoints)
 - [Firestore implementation](#firestore-implementation)
 - [State and caching](#state-and-caching)
-- [Firebase Emulator Suite](#firebase-emulator-suite)
 - [Security model](#security-model)
 - [Deployment](#deployment)
 - [Development conventions](#development-conventions)
@@ -39,9 +38,9 @@ Fluxfire does not have an application database and does not ask for a Firebase s
 - Listing of the signed-in user's active Firebase projects.
 - Project search and selection.
 - Resolution of the first registered Firebase web app's configuration.
-- Locally persisted project selection and emulator preferences.
+- Locally persisted project selection.
 - Fresh project-access validation before the dashboard renders, on window
-  focus, every 60 seconds, and after production Firestore permission errors.
+  focus, every 60 seconds, and after Firestore permission errors.
 - Automatic disconnection and project-cache removal when access is revoked.
 
 ### Firestore browser
@@ -56,12 +55,11 @@ Fluxfire does not have an application database and does not ask for a Firebase s
 - Support for Firestore strings, integers, doubles, booleans, nulls, timestamps, geographic points, document references, arrays, maps, and bytes.
 - Filter queries using comparison, membership, array, null, and NaN operators.
 - Searchable filter and order field pickers populated from loaded documents, with support for custom and nested field paths.
-- Multiple `orderBy` clauses and configurable query limits.
+- Multiple `orderBy` clauses and configurable query limits (up to 1,000 results).
 - Stable collection pagination with a default page size of 50.
 - Bulk document deletion in batches of up to 500 writes.
 - JSON and CSV export of selected documents.
 - Helpful permission errors and direct links to create missing composite indexes.
-- Direct connection to the local Firestore emulator.
 
 ### Query workbench
 
@@ -94,7 +92,6 @@ flowchart LR
     M -->|Projects and web config| U
     N -->|session.accessToken| U
     U -->|Direct REST calls with bearer token| F[Firestore REST API]
-    U -. Emulator mode .-> E[Local Firestore emulator]
 ```
 
 The application has two API access patterns:
@@ -307,7 +304,7 @@ Firestore's normal query restrictions still apply. For example, the first order 
 | `/firestore` | Page | Full Firestore browser and embedded query builder. |
 | `/auth` | Page | Placeholder for Firebase Authentication management. |
 | `/query` | Page | Standalone visual query workbench with request preview, results, exports, and document inspection. |
-| `/settings` | Page | Emulator ports and appearance controls. |
+| `/settings` | Page | Appearance controls. |
 | `/api/auth/[...nextauth]` | Route handler | NextAuth/Auth.js sign-in, callback, session, and sign-out endpoints. |
 | `GET /api/projects` | Route handler | Lists active Firebase projects visible to the current Google identity. |
 | `GET /api/projects/:projectId/access` | Route handler | Performs an uncached access check for the persisted project. A Firebase Management `403` or `404` becomes `{ accessible: false }`. |
@@ -371,11 +368,8 @@ Bulk commits are split into chunks of 500 writes and invalidate the entire proje
 
 - Selected Firebase project metadata.
 - Resolved Firebase web configuration.
-- Emulator enabled/disabled state.
-- Firestore emulator port, default `8080`.
-- Auth emulator port, default `9099`.
 
-Disconnecting clears project metadata but leaves emulator preferences intact. This persistence is browser-local and is not synchronized to a backend.
+Disconnecting clears both. This persistence is browser-local and is not synchronized to a backend.
 
 ### TanStack Query
 
@@ -391,7 +385,7 @@ Every Firestore cache key begins with `['firestore', projectId, ...]`. Preserve 
 
 The dashboard access guard uses a separate
 `['firebase-project-access', projectId]` query. It always refetches on mount,
-refetches on window focus, and polls every 60 seconds. A production Firestore
+refetches on window focus, and polls every 60 seconds. A Firestore
 `403` invalidates this query immediately. If the dedicated access endpoint says
 the project is no longer accessible, Fluxfire removes the project’s Firestore
 and configuration queries, clears the Zustand selection, and redirects to the
@@ -400,23 +394,6 @@ user who still has valid, more limited access.
 
 Disconnect and sign-out also clear the relevant in-memory query data. TanStack
 Query data is not persisted to browser storage.
-
-## Firebase Emulator Suite
-
-Enable emulator mode from the sidebar or Settings. Firestore requests then use:
-
-```text
-http://localhost:{firestorePort}/v1/projects/{projectId}/databases/(default)/documents
-```
-
-The default Firestore port is `8080`. The default Auth emulator port is `9099`, but it is only stored for future Auth-page support and currently does not affect authentication traffic.
-
-Important emulator behavior:
-
-- The selected Firebase project ID is still included in emulator paths.
-- Google sign-in still uses the configured OAuth client; emulator mode only redirects Firestore data calls.
-- Ensure the emulator is running and allows requests from `http://localhost:3000`.
-- The sidebar clearly labels the current connection as **Emulator** or **Production**.
 
 ## Security model
 
@@ -515,10 +492,6 @@ Sign out and sign in again. If the OAuth client was changed, verify both credent
 
 Fluxfire returns a partial configuration and can still attempt Firestore REST operations. Create a web app in Firebase Console if a complete Firebase web configuration is required.
 
-### Emulator requests fail
-
-Confirm the Firestore emulator is listening on the port configured in Settings, the project ID matches the emulator invocation, and the browser can reach `localhost` from where Fluxfire is running.
-
 ## Known limitations
 
 - Only the default Firestore database is supported.
@@ -528,7 +501,7 @@ Confirm the Firestore emulator is listening on the port configured in Settings, 
 - No Firestore Security Rules editor.
 - No indexes-management UI beyond links to Firebase Console.
 - No import workflow.
-- Structured-query results do not have UI pagination.
+- Structured-query results do not have UI pagination and are capped at 1,000 documents.
 - The collection tree loads up to 50 documents per expanded collection node.
 - Firebase Authentication user management is not implemented.
 - There is no automated test suite, Storybook, or repository CI configuration.
@@ -545,7 +518,7 @@ app/
 │   ├── auth/                 # Placeholder Auth page
 │   ├── firestore/            # Firestore browser page and URL state
 │   ├── query/                # Standalone visual Query workbench
-│   ├── settings/             # Emulator and appearance settings
+│   ├── settings/             # Appearance settings
 │   └── layout.tsx            # Dashboard shell
 ├── api/
 │   ├── auth/[...nextauth]/   # NextAuth route handlers
@@ -575,7 +548,7 @@ lib/
 ├── auth.ts                   # Google provider, JWT, refresh, and session logic
 └── utils.ts                  # Shared class-name helper
 
-stores/project-store.ts       # Persisted project/emulator state
+stores/project-store.ts       # Persisted project selection
 types/firestore.ts            # Firestore domain types
 types/project.ts              # Firebase project/config types
 middleware.ts                 # Route protection and redirects

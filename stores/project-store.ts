@@ -5,35 +5,20 @@ import type { FirebaseConfig, FirebaseProject } from "@/types/project"
 interface ProjectState {
   selectedProject: FirebaseProject | null
   firebaseConfig: FirebaseConfig | null
-  useEmulator: boolean
-  emulatorPorts: {
-    firestore: number
-    auth: number
-  }
   setSelectedProject: (project: FirebaseProject | null) => void
   setFirebaseConfig: (config: FirebaseConfig | null) => void
-  toggleEmulator: () => void
-  setEmulatorPorts: (ports: Partial<{ firestore: number; auth: number }>) => void
   disconnect: () => void
 }
+
+type PersistedProjectState = Pick<ProjectState, "selectedProject" | "firebaseConfig">
 
 export const useProjectStore = create<ProjectState>()(
   persist(
     (set) => ({
       selectedProject: null,
       firebaseConfig: null,
-      useEmulator: false,
-      emulatorPorts: {
-        firestore: 8080,
-        auth: 9099,
-      },
       setSelectedProject: (project) => set({ selectedProject: project }),
       setFirebaseConfig: (config) => set({ firebaseConfig: config }),
-      toggleEmulator: () => set((state) => ({ useEmulator: !state.useEmulator })),
-      setEmulatorPorts: (ports) =>
-        set((state) => ({
-          emulatorPorts: { ...state.emulatorPorts, ...ports },
-        })),
       disconnect: () =>
         set({
           selectedProject: null,
@@ -42,6 +27,19 @@ export const useProjectStore = create<ProjectState>()(
     }),
     {
       name: "fluxfire-project",
+      // v1 dropped the emulator settings; persist only the project selection.
+      version: 1,
+      partialize: (state): PersistedProjectState => ({
+        selectedProject: state.selectedProject,
+        firebaseConfig: state.firebaseConfig,
+      }),
+      migrate: (persisted): PersistedProjectState => {
+        const state = persisted as Partial<PersistedProjectState> | undefined
+        return {
+          selectedProject: state?.selectedProject ?? null,
+          firebaseConfig: state?.firebaseConfig ?? null,
+        }
+      },
     }
   )
 )

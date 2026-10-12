@@ -10,7 +10,13 @@ interface ColumnResizeHandleProps {
   max: number
   edge: "left" | "right"
   className?: string
+  /** Commits a width: on key presses and when a drag ends. */
   onChange: (value: number) => void
+  /**
+   * Applies a width while dragging without committing it, so the layout can
+   * follow the pointer without re-rendering React on every move.
+   */
+  onPreview?: (value: number) => void
 }
 
 export function ColumnResizeHandle({
@@ -21,8 +27,21 @@ export function ColumnResizeHandle({
   edge,
   className,
   onChange,
+  onPreview,
 }: ColumnResizeHandleProps) {
-  const drag = useRef<{ startX: number; startValue: number } | null>(null)
+  const drag = useRef<{
+    startX: number
+    startValue: number
+    lastValue: number
+  } | null>(null)
+
+  const endDrag = () => {
+    const current = drag.current
+    drag.current = null
+    if (current && current.lastValue !== current.startValue) {
+      onChange(current.lastValue)
+    }
+  }
 
   const resizeBy = (delta: number) => {
     onChange(Math.min(max, Math.max(min, value + delta)))
@@ -46,27 +65,25 @@ export function ColumnResizeHandle({
       onPointerDown={(event) => {
         event.preventDefault()
         event.currentTarget.setPointerCapture(event.pointerId)
-        drag.current = { startX: event.clientX, startValue: value }
+        drag.current = { startX: event.clientX, startValue: value, lastValue: value }
       }}
       onPointerMove={(event) => {
         if (!drag.current) return
         const direction = edge === "left" ? 1 : -1
-        onChange(
-          Math.min(
-            max,
-            Math.max(
-              min,
-              drag.current.startValue + (event.clientX - drag.current.startX) * direction
-            )
+        const next = Math.min(
+          max,
+          Math.max(
+            min,
+            drag.current.startValue + (event.clientX - drag.current.startX) * direction
           )
         )
+        if (next === drag.current.lastValue) return
+        drag.current.lastValue = next
+        if (onPreview) onPreview(next)
+        else onChange(next)
       }}
-      onPointerUp={() => {
-        drag.current = null
-      }}
-      onPointerCancel={() => {
-        drag.current = null
-      }}
+      onPointerUp={endDrag}
+      onPointerCancel={endDrag}
       onKeyDown={(event) => {
         if (event.key === "ArrowLeft") {
           event.preventDefault()

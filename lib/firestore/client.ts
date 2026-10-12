@@ -5,7 +5,6 @@ export interface FirestoreClientOptions {
   token: string
   projectId: string
   databaseId?: string
-  emulator?: { host: string; port: number }
   onPermissionDenied?: () => void
 }
 
@@ -28,10 +27,7 @@ export interface FirestoreRequestInit {
 
 export function createFirestoreClient(opts: FirestoreClientOptions): FirestoreClient {
   const databaseId = opts.databaseId ?? "(default)"
-  const origin = opts.emulator
-    ? `http://${opts.emulator.host}:${opts.emulator.port}`
-    : "https://firestore.googleapis.com"
-  const baseUrl = `${origin}/v1/projects/${opts.projectId}/databases/${encodeURIComponent(
+  const baseUrl = `https://firestore.googleapis.com/v1/projects/${opts.projectId}/databases/${encodeURIComponent(
     databaseId
   )}`
   const documentsUrl = `${baseUrl}/documents`
@@ -70,7 +66,7 @@ export function createFirestoreClient(opts: FirestoreClientOptions): FirestoreCl
     const data = text ? safeJsonParse(text) : undefined
 
     if (!res.ok) {
-      if (res.status === 403 && !opts.emulator) {
+      if (res.status === 403) {
         opts.onPermissionDenied?.()
       }
       throw parseFirestoreError(res.status, data ?? text)

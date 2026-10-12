@@ -33,6 +33,8 @@ interface Props {
     pageNum: number
   }
   failedPaths?: Set<string>
+  /** Focus target after actions that remove the focused control (e.g. bulk delete). */
+  ref?: React.Ref<HTMLDivElement>
 }
 
 const MAX_INLINE_COLUMNS = 12
@@ -47,6 +49,7 @@ export function DocumentsTable({
   showPathColumn,
   pagination,
   failedPaths,
+  ref,
 }: Props) {
   const columns = useMemo(() => {
     const seen = new Set<string>()
@@ -64,13 +67,20 @@ export function DocumentsTable({
   const someSelected = documents.some((d) => selection.has(d.path))
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+    <div
+      ref={ref}
+      role="region"
+      aria-label="Documents"
+      tabIndex={-1}
+      className="flex min-h-0 flex-1 flex-col overflow-hidden outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+    >
       <div className="flex-1 overflow-auto">
         <Table>
           <TableHeader>
             <TableRow>
               <TableHead className="w-10">
                 <Checkbox
+                  aria-label="Select all documents on this page"
                   checked={allSelected ? true : someSelected ? "indeterminate" : false}
                   onCheckedChange={(v) => {
                     const next = new Set(selection)
@@ -129,6 +139,7 @@ export function DocumentsTable({
                 >
                   <TableCell onClick={(e) => e.stopPropagation()}>
                     <Checkbox
+                      aria-label={`Select ${doc.id}`}
                       checked={isSel}
                       onCheckedChange={(v) => {
                         const next = new Set(selection)
@@ -140,24 +151,42 @@ export function DocumentsTable({
                   </TableCell>
                   <TableCell className="font-mono text-xs">
                     <div className="flex items-center gap-2">
-                      <span className="truncate">{doc.id}</span>
+                      <button
+                        type="button"
+                        aria-current={isOpen ? "true" : undefined}
+                        title={doc.id}
+                        className="truncate rounded-sm text-left outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          onOpenDocument(doc.path)
+                        }}
+                      >
+                        {doc.id}
+                      </button>
                       {failed && (
-                        <Badge variant="destructive" className="text-[10px]">
-                          failed
+                        <Badge variant="destructive" className="text-2xs">
+                          Failed
                         </Badge>
                       )}
                     </div>
                   </TableCell>
                   {showPathColumn && (
-                    <TableCell className="font-mono text-[11px] text-muted-foreground">
+                    <TableCell className="font-mono text-2xs text-muted-foreground">
                       {doc.path}
                     </TableCell>
                   )}
-                  {columns.map((col) => (
-                    <TableCell key={col} className="max-w-[300px] truncate font-mono text-xs">
-                      {formatCell(doc.fields[col])}
-                    </TableCell>
-                  ))}
+                  {columns.map((col) => {
+                    const text = formatCell(doc.fields[col])
+                    return (
+                      <TableCell
+                        key={col}
+                        className="max-w-[300px] truncate font-mono text-xs"
+                        title={text}
+                      >
+                        {text}
+                      </TableCell>
+                    )
+                  })}
                 </TableRow>
               )
             })}
@@ -165,7 +194,7 @@ export function DocumentsTable({
         </Table>
       </div>
       {pagination && (
-        <div className="flex items-center justify-between border-t px-4 py-2 text-xs text-muted-foreground">
+        <div className="flex items-center justify-between border-t px-4 py-2 text-xs tabular-nums text-muted-foreground">
           <span>
             {documents.length} doc{documents.length === 1 ? "" : "s"} — page {pagination.pageNum}
           </span>

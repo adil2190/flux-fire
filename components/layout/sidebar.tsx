@@ -10,7 +10,6 @@ import {
   Users,
   Terminal,
   Settings,
-  Zap,
   LogOut,
   Flame,
   ChevronDown,
@@ -20,8 +19,6 @@ import {
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
-import { Switch } from "@/components/ui/switch"
-import { Label } from "@/components/ui/label"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import {
   DropdownMenu,
@@ -46,8 +43,8 @@ export function Sidebar() {
   const qc = useQueryClient()
   const { data: session } = useSession()
   const [collapsed, setCollapsed] = useState(false)
-  const { selectedProject, useEmulator, toggleEmulator, disconnect } =
-    useProjectStore()
+  const selectedProject = useProjectStore((s) => s.selectedProject)
+  const disconnect = useProjectStore((s) => s.disconnect)
 
   const handleDisconnect = () => {
     if (selectedProject) {
@@ -84,7 +81,7 @@ export function Sidebar() {
   return (
     <aside
       className={cn(
-        "flex h-full shrink-0 flex-col border-r bg-card transition-[width] duration-200",
+        "flex h-full shrink-0 flex-col border-r bg-card transition-[width] duration-200 motion-reduce:transition-none",
         collapsed ? "w-16" : "w-64"
       )}
     >
@@ -116,12 +113,20 @@ export function Sidebar() {
               {!collapsed && (
                 <span className="flex min-w-0 flex-1 items-center justify-between gap-2 text-left">
                   <span className="min-w-0">
-                    <span className="block truncate font-semibold">
+                    <span
+                      className="block truncate font-semibold"
+                      title={selectedProject?.displayName}
+                    >
                       {selectedProject?.displayName || "Fluxfire"}
                     </span>
-                    <span className="block text-xs text-muted-foreground">
-                      {useEmulator ? "Emulator" : "Production"}
-                    </span>
+                    {selectedProject && (
+                      <span
+                        className="block truncate text-xs text-muted-foreground"
+                        title={selectedProject.projectId}
+                      >
+                        {selectedProject.projectId}
+                      </span>
+                    )}
                   </span>
                   <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
                 </span>
@@ -131,7 +136,7 @@ export function Sidebar() {
           <DropdownMenuContent align={collapsed ? "start" : "end"}>
             <DropdownMenuItem onClick={() => router.push("/projects")}>
               <FolderOpen className="mr-2 h-4 w-4" />
-              Switch Project
+              Switch project
             </DropdownMenuItem>
             <DropdownMenuItem onClick={handleDisconnect}>
               <LogOut className="mr-2 h-4 w-4" />
@@ -166,6 +171,7 @@ export function Sidebar() {
             <Link
               key={href}
               href={href}
+              aria-current={isActive ? "page" : undefined}
               title={collapsed ? label : undefined}
               aria-label={collapsed ? label : undefined}
               className={cn(
@@ -182,54 +188,6 @@ export function Sidebar() {
           )
         })}
       </nav>
-
-      <Separator />
-
-      {/* Emulator Toggle */}
-      <div className={cn("p-4", collapsed && "p-2")}>
-        {collapsed ? (
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            className="mx-auto h-9 w-9"
-            aria-label={useEmulator ? "Disable emulator" : "Enable emulator"}
-            title={useEmulator ? "Emulator on" : "Emulator off"}
-            onClick={toggleEmulator}
-          >
-            <Zap
-              className={cn(
-                "h-4 w-4",
-                useEmulator ? "text-yellow-500" : "text-muted-foreground"
-              )}
-            />
-          </Button>
-        ) : (
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Zap
-                className={cn(
-                  "h-4 w-4",
-                  useEmulator ? "text-yellow-500" : "text-muted-foreground"
-                )}
-              />
-              <Label htmlFor="emulator-sidebar" className="text-sm font-medium">
-                Emulator
-              </Label>
-            </div>
-            <Switch
-              id="emulator-sidebar"
-              checked={useEmulator}
-              onCheckedChange={toggleEmulator}
-            />
-          </div>
-        )}
-        {!collapsed && useEmulator && (
-          <p className="mt-1 text-xs text-muted-foreground">
-            Connected to local emulators
-          </p>
-        )}
-      </div>
 
       <Separator />
 
@@ -252,7 +210,9 @@ export function Sidebar() {
                 <AvatarFallback className="text-xs">{userInitials}</AvatarFallback>
               </Avatar>
               {!collapsed && (
-                <span className="truncate text-sm">{session?.user?.name}</span>
+                <span className="truncate text-sm" title={session?.user?.name ?? undefined}>
+                  {session?.user?.name}
+                </span>
               )}
             </Button>
           </DropdownMenuTrigger>

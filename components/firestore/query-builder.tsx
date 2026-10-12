@@ -1,7 +1,7 @@
 "use client"
 
 import { Plus, Play, RotateCcw, Trash2, ChevronUp, ChevronDown } from "lucide-react"
-import { useState } from "react"
+import { useId, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import {
@@ -16,8 +16,7 @@ import { Label } from "@/components/ui/label"
 import { Badge } from "@/components/ui/badge"
 import { FieldEditor } from "./field-editor"
 import { FieldPathCombobox } from "./field-path-combobox"
-import { isUnaryOp, inequalityFields } from "@/lib/firestore/queries"
-import { cn } from "@/lib/utils"
+import { isUnaryOp, inequalityFields, MAX_QUERY_LIMIT } from "@/lib/firestore/queries"
 import type { FilterOp, OrderBy, QueryFilter, QueryState } from "@/types/firestore"
 
 interface Props {
@@ -26,8 +25,8 @@ interface Props {
   onRun: () => void
   onReset: () => void
   isRunning: boolean
-  layout?: "inline" | "stacked"
-  fieldPaths?: string[]
+  /** Suggestions for filter and order fields; custom paths can still be typed. */
+  fieldPaths: string[]
 }
 
 const ALL_OPS: { value: FilterOp; label: string }[] = [
@@ -53,34 +52,37 @@ export function QueryBuilder({
   onRun,
   onReset,
   isRunning,
-  layout = "inline",
   fieldPaths,
 }: Props) {
   const [open, setOpen] = useState(true)
+  const limitId = useId()
   const inequalities = inequalityFields(state.filters)
   const orderByMismatch =
     inequalities.length > 0 &&
     state.orderBy.length > 0 &&
     state.orderBy[0].field !== inequalities[0]
 
+  // Rows stack by default and go inline once the builder is wide enough, so
+  // the layout follows the panel width instead of a prop.
   return (
-    <div className="border-b bg-card">
+    <div className="@container border-b bg-card">
       <div className="flex items-center justify-between px-3 py-1.5">
         <div className="flex items-center gap-2">
           <Button
             variant="ghost"
             size="sm"
             className="h-7 px-2"
+            aria-expanded={open}
             onClick={() => setOpen((v) => !v)}
           >
             {open ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
             <span className="ml-1 text-xs">Query</span>
           </Button>
-          <Badge variant="outline" className="font-mono text-[11px]">
+          <Badge variant="outline" className="font-mono text-2xs">
             {state.allDescendants ? `collectionGroup(${state.collectionId})` : state.collectionId || "(no collection)"}
           </Badge>
           {state.filters.length > 0 && (
-            <Badge variant="secondary" className="text-[11px]">
+            <Badge variant="secondary" className="text-2xs">
               {state.filters.length} filter{state.filters.length === 1 ? "" : "s"}
             </Badge>
           )}
@@ -97,7 +99,7 @@ export function QueryBuilder({
           <Button
             size="sm"
             className="h-7 gap-1 text-xs"
-            disabled={isRunning || !state.collectionId}
+            disabled={isRunning}
             onClick={onRun}
           >
             <Play className="h-3.5 w-3.5" /> Run
@@ -120,16 +122,16 @@ export function QueryBuilder({
           <div className="space-y-1">
             <div className="flex min-h-7 items-center justify-between gap-2">
               <div className="flex items-center gap-2">
-                <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Where</p>
+                <p className="text-2xs font-medium uppercase tracking-wide text-muted-foreground">Where</p>
                 {state.filters.length === 0 && (
-                  <span className="text-[11px] text-muted-foreground">No filters</span>
+                  <span className="text-2xs text-muted-foreground">No filters</span>
                 )}
               </div>
               <Button
                 type="button"
                 variant="outline"
                 size="sm"
-                className="h-6 gap-1 px-2 text-[11px]"
+                className="h-6 gap-1 px-2 text-2xs"
                 onClick={() =>
                   onChange({
                     ...state,
@@ -152,7 +154,6 @@ export function QueryBuilder({
               <FilterRow
                 key={f.id}
                 filter={f}
-                layout={layout}
                 fieldPaths={fieldPaths}
                 onChange={(next) =>
                   onChange({
@@ -170,16 +171,16 @@ export function QueryBuilder({
           <div className="space-y-1">
             <div className="flex min-h-7 items-center justify-between gap-2">
               <div className="flex items-center gap-2">
-                <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Order by</p>
+                <p className="text-2xs font-medium uppercase tracking-wide text-muted-foreground">Order by</p>
                 {state.orderBy.length === 0 && (
-                  <span className="text-[11px] text-muted-foreground">Default document order</span>
+                  <span className="text-2xs text-muted-foreground">Default document order</span>
                 )}
               </div>
               <Button
                 type="button"
                 variant="outline"
                 size="sm"
-                className="h-6 gap-1 px-2 text-[11px]"
+                className="h-6 gap-1 px-2 text-2xs"
                 onClick={() =>
                   onChange({
                     ...state,
@@ -194,7 +195,6 @@ export function QueryBuilder({
               <OrderByRow
                 key={idx}
                 orderBy={o}
-                layout={layout}
                 fieldPaths={fieldPaths}
                 onChange={(next) =>
                   onChange({
@@ -213,15 +213,25 @@ export function QueryBuilder({
           </div>
 
           <div className="flex items-center gap-2">
-            <Label className="text-xs">Limit</Label>
+            <Label htmlFor={limitId} className="text-xs">Limit</Label>
             <Input
+              id={limitId}
               type="number"
+              min={1}
+              max={MAX_QUERY_LIMIT}
+              aria-describedby={`${limitId}-hint`}
               className="h-7 w-24 text-xs"
-              value={state.limit}
+              value={state.limit || ""}
               onChange={(e) =>
-                onChange({ ...state, limit: Math.max(0, Number(e.target.value)) })
+                onChange({
+                  ...state,
+                  limit: Math.min(MAX_QUERY_LIMIT, Math.max(0, Number(e.target.value))),
+                })
               }
             />
+            <span id={`${limitId}-hint`} className="text-2xs text-muted-foreground">
+              Max {MAX_QUERY_LIMIT.toLocaleString("en-US")}
+            </span>
           </div>
 
           {orderByMismatch && (
@@ -240,56 +250,28 @@ interface FilterRowProps {
   filter: QueryFilter
   onChange: (next: QueryFilter) => void
   onRemove: () => void
-  layout: "inline" | "stacked"
-  fieldPaths?: string[]
+  fieldPaths: string[]
 }
 
-function FilterRow({
-  filter,
-  onChange,
-  onRemove,
-  layout,
-  fieldPaths,
-}: FilterRowProps) {
+function FilterRow({ filter, onChange, onRemove, fieldPaths }: FilterRowProps) {
   const unary = isUnaryOp(filter.op)
-  const stacked = layout === "stacked"
 
   return (
-    <div
-      className={cn(
-        "gap-2",
-        stacked
-          ? "grid grid-cols-[minmax(0,1fr)_10rem_2rem] items-start"
-          : "flex items-start"
-      )}
-    >
-      {fieldPaths ? (
-        <FieldPathCombobox
-          value={filter.field}
-          options={fieldPaths}
-          onChange={(field) => onChange({ ...filter, field })}
-          className={stacked ? "col-start-1 row-start-1 w-full" : "w-48"}
-        />
-      ) : (
-        <Input
-          placeholder="field.path"
-          className={cn(
-            "h-8 font-mono text-xs",
-            stacked ? "col-start-1 row-start-1 w-full" : "w-48"
-          )}
-          value={filter.field}
-          onChange={(e) => onChange({ ...filter, field: e.target.value })}
-        />
-      )}
+    <div className="grid grid-cols-[minmax(0,1fr)_10rem_2rem] items-start gap-2 @2xl:flex">
+      <FieldPathCombobox
+        aria-label="Filter field path"
+        value={filter.field}
+        options={fieldPaths}
+        onChange={(field) => onChange({ ...filter, field })}
+        className="col-start-1 row-start-1 w-full @2xl:w-48"
+      />
       <Select
         value={filter.op}
         onValueChange={(v) => onChange({ ...filter, op: v as FilterOp })}
       >
         <SelectTrigger
-          className={cn(
-            "h-8 w-40 text-xs",
-            stacked && "col-start-2 row-start-1"
-          )}
+          aria-label="Filter operator"
+          className="col-start-2 row-start-1 h-8 w-40 text-xs"
         >
           <SelectValue />
         </SelectTrigger>
@@ -301,27 +283,25 @@ function FilterRow({
           ))}
         </SelectContent>
       </Select>
-      <div
-        className={cn(
-          "flex-1",
-          stacked && "col-span-3 col-start-1 row-start-2",
-          unary && "pointer-events-none opacity-40"
+      <div className="col-span-3 col-start-1 row-start-2 @2xl:flex-1">
+        {unary ? (
+          <p className="flex h-8 items-center text-xs text-muted-foreground">
+            No value needed for this operator
+          </p>
+        ) : (
+          <FieldEditor
+            value={filter.value}
+            onChange={(v) => onChange({ ...filter, value: v })}
+            label="Filter"
+          />
         )}
-      >
-        <FieldEditor
-          value={filter.value}
-          onChange={(v) => onChange({ ...filter, value: v })}
-          compact
-        />
       </div>
       <Button
         type="button"
         variant="ghost"
         size="icon"
-        className={cn(
-          "h-8 w-8",
-          stacked && "col-start-3 row-start-1"
-        )}
+        className="col-start-3 row-start-1 h-8 w-8"
+        aria-label={filter.field ? `Remove filter on ${filter.field}` : "Remove filter"}
         onClick={onRemove}
       >
         <Trash2 className="h-3.5 w-3.5" />
@@ -334,49 +314,24 @@ interface OrderByRowProps {
   orderBy: OrderBy
   onChange: (next: OrderBy) => void
   onRemove: () => void
-  layout: "inline" | "stacked"
-  fieldPaths?: string[]
+  fieldPaths: string[]
 }
 
-function OrderByRow({
-  orderBy,
-  onChange,
-  onRemove,
-  layout,
-  fieldPaths,
-}: OrderByRowProps) {
-  const stacked = layout === "stacked"
-
+function OrderByRow({ orderBy, onChange, onRemove, fieldPaths }: OrderByRowProps) {
   return (
-    <div
-      className={cn(
-        "flex items-center gap-2",
-        stacked && "grid grid-cols-[minmax(0,1fr)_7rem_2rem]"
-      )}
-    >
-      {fieldPaths ? (
-        <FieldPathCombobox
-          value={orderBy.field}
-          options={fieldPaths}
-          onChange={(field) => onChange({ ...orderBy, field })}
-          className={stacked ? "w-full" : "w-48"}
-        />
-      ) : (
-        <Input
-          placeholder="field.path"
-          className={cn(
-            "h-8 font-mono text-xs",
-            stacked ? "w-full" : "w-48"
-          )}
-          value={orderBy.field}
-          onChange={(e) => onChange({ ...orderBy, field: e.target.value })}
-        />
-      )}
+    <div className="grid grid-cols-[minmax(0,1fr)_7rem_2rem] items-center gap-2 @2xl:flex">
+      <FieldPathCombobox
+        aria-label="Order by field path"
+        value={orderBy.field}
+        options={fieldPaths}
+        onChange={(field) => onChange({ ...orderBy, field })}
+        className="w-full @2xl:w-48"
+      />
       <Select
         value={orderBy.dir}
         onValueChange={(v) => onChange({ ...orderBy, dir: v as "asc" | "desc" })}
       >
-        <SelectTrigger className="h-8 w-28 text-xs">
+        <SelectTrigger className="h-8 w-28 text-xs" aria-label="Sort direction">
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
@@ -389,6 +344,7 @@ function OrderByRow({
         variant="ghost"
         size="icon"
         className="h-8 w-8"
+        aria-label={orderBy.field ? `Remove ordering by ${orderBy.field}` : "Remove ordering"}
         onClick={onRemove}
       >
         <Trash2 className="h-3.5 w-3.5" />

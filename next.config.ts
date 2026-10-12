@@ -1,7 +1,10 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  /* config options here */
+  experimental: {
+    // Not in Next's default list; keeps dev compiles to the primitives used.
+    optimizePackageImports: ["radix-ui"],
+  },
 };
 
 export default nextConfig;

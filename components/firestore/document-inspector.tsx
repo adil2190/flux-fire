@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { memo, useCallback, useEffect, useId, useMemo, useReducer, useRef, useState } from "react"
 import { Loader2, Save, Trash2, X, Plus, ChevronRight } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -9,35 +9,101 @@ import { Badge } from "@/components/ui/badge"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { toast } from "sonner"
 import { FieldEditor, defaultFieldValue } from "./field-editor"
+import { ConfirmDialog } from "./confirm-dialog"
 import { useDocument } from "@/hooks/firestore/use-document"
 import { useCollectionIds } from "@/hooks/firestore/use-collection-ids"
 import { useWriteDocument } from "@/hooks/firestore/use-write-document"
 import { useDeleteDocument } from "@/hooks/firestore/use-delete-document"
 import { fieldValueToPlain } from "@/lib/firestore/encoding"
 import { cn } from "@/lib/utils"
-import type { FieldValue } from "@/types/firestore"
+import { useProjectStore } from "@/stores/project-store"
+import type { FieldValue, FirestoreDocument } from "@/types/firestore"
 import { FirestoreError } from "@/lib/firestore/errors"
 
 interface Props {
   docPath: string | null
   onClose: () => void
   onNavigate: (path: string) => void
+  /** Called after a successful delete, just before onClose. */
+  onDeleted?: () => void
 }
 
-export function DocumentInspector({ docPath, onClose, onNavigate }: Props) {
+interface DraftState {
+  draft: Record<string, FieldValue>
+  dirty: string[]
+  baseUpdateTime?: string
+}
+
+// Unsaved edits survive switching documents, closing the inspector, or hiding
+// the tab, keyed by project + document path. Entries are dropped on save,
+// discard, or delete.
+const draftCache = new Map<string, DraftState>()
+
+// One listener for the whole app: warn before unload while any draft is
+// unsaved, including drafts in hidden tabs whose effects are paused.
+if (typeof window !== "undefined") {
+  window.addEventListener("beforeunload", (event) => {
+    if (draftCache.size > 0) event.preventDefault()
+  })
+}
+
+function freshDraft(doc: FirestoreDocument): DraftState {
+  return { draft: doc.fields, dirty: [], baseUpdateTime: doc.updateTime }
+}
+
+type DraftAction =
+  | { type: "change"; name: string; value: FieldValue }
+  | { type: "rename"; from: string; to: string }
+  | { type: "delete"; name: string }
+  | { type: "add" }
+  | { type: "saved" }
+  | { type: "reset"; state: DraftState }
+
+function withDirty(state: DraftState, ...names: string[]): string[] {
+  return Array.from(new Set([...state.dirty, ...names]))
+}
+
+function draftReducer(state: DraftState, action: DraftAction): DraftState {
+  switch (action.type) {
+    case "change":
+      return {
+        ...state,
+        draft: { ...state.draft, [action.name]: action.value },
+        dirty: withDirty(state, action.name),
+      }
+    case "rename": {
+      const { [action.from]: value, ...rest } = state.draft
+      return {
+        ...state,
+        draft: { ...rest, [action.to]: value },
+        dirty: withDirty(state, action.from, action.to),
+      }
+    }
+    case "delete": {
+      const rest = { ...state.draft }
+      delete rest[action.name]
+      return { ...state, draft: rest, dirty: withDirty(state, action.name) }
+    }
+    case "add": {
+      let i = 1
+      let name = "newField"
+      while (name in state.draft) name = `newField${i++}`
+      return {
+        ...state,
+        draft: { ...state.draft, [name]: defaultFieldValue("string") },
+        dirty: withDirty(state, name),
+      }
+    }
+    case "saved":
+      return { ...state, dirty: [] }
+    case "reset":
+      return action.state
+  }
+}
+
+export function DocumentInspector({ docPath, onClose, onNavigate, onDeleted }: Props) {
   const { data: doc, isLoading, error } = useDocument(docPath ?? undefined)
-  const writeDoc = useWriteDocument()
-  const deleteDoc = useDeleteDocument()
-
-  const [draft, setDraft] = useState<Record<string, FieldValue>>({})
-  const [dirty, setDirty] = useState<Set<string>>(new Set())
-
-  useEffect(() => {
-    setDraft(doc?.fields ?? {})
-    setDirty(new Set())
-  }, [doc?.path, doc?.updateTime, doc?.fields])
-
-  const fieldNames = useMemo(() => Object.keys(draft).sort(), [draft])
+  const projectId = useProjectStore((s) => s.selectedProject?.projectId)
 
   if (!docPath) {
     return (
@@ -61,14 +127,87 @@ export function DocumentInspector({ docPath, onClose, onNavigate }: Props) {
         <InspectorHeader path={docPath} onClose={onClose} dirty={false} />
         <Alert variant="destructive" className="m-3">
           <AlertDescription>
-            {error instanceof FirestoreError ? error.message : "Failed to load document"}
+            {error instanceof FirestoreError ? error.message : "Unable to load this document. Try again."}
           </AlertDescription>
         </Alert>
       </div>
     )
   }
 
+  return (
+    <DocumentEditor
+      key={doc.path}
+      doc={doc}
+      cacheKey={`${projectId}/${doc.path}`}
+      onClose={onClose}
+      onNavigate={onNavigate}
+      onDeleted={onDeleted}
+    />
+  )
+}
+
+interface DocumentEditorProps {
+  doc: FirestoreDocument
+  cacheKey: string
+  onClose: () => void
+  onNavigate: (path: string) => void
+  onDeleted?: () => void
+}
+
+function DocumentEditor({ doc, cacheKey, onClose, onNavigate, onDeleted }: DocumentEditorProps) {
+  const writeDoc = useWriteDocument()
+  const deleteDoc = useDeleteDocument()
+  const [state, dispatch] = useReducer(
+    draftReducer,
+    cacheKey,
+    (key) => draftCache.get(key) ?? freshDraft(doc)
+  )
+  const [confirmDelete, setConfirmDelete] = useState(false)
+  const { draft } = state
+  const dirty = useMemo(() => new Set(state.dirty), [state.dirty])
   const isDirty = dirty.size > 0
+
+  // Pick up server changes (after a save, or someone else's write) only while
+  // there are no local edits, so a refetch never wipes unsaved work.
+  if (!isDirty && state.baseUpdateTime !== doc.updateTime) {
+    dispatch({ type: "reset", state: freshDraft(doc) })
+  }
+
+  useEffect(() => {
+    if (state.dirty.length > 0) draftCache.set(cacheKey, state)
+    else draftCache.delete(cacheKey)
+  }, [cacheKey, state])
+
+  // Lets the stable rename handler validate against the latest draft.
+  const draftRef = useRef(draft)
+  useEffect(() => {
+    draftRef.current = draft
+  }, [draft])
+
+  const fieldNames = useMemo(() => Object.keys(draft).sort(), [draft])
+
+  const changeField = useCallback(
+    (name: string, value: FieldValue) => dispatch({ type: "change", name, value }),
+    []
+  )
+  const deleteField = useCallback(
+    (name: string) => dispatch({ type: "delete", name }),
+    []
+  )
+  const renameField = useCallback((from: string, to: string): string | null => {
+    if (to === from) return null
+    if (!to) return "Enter a field name."
+    if (to in draftRef.current) {
+      return `A field named “${to}” already exists. Choose another name.`
+    }
+    dispatch({ type: "rename", from, to })
+    return null
+  }, [])
+
+  const discard = () => {
+    draftCache.delete(cacheKey)
+    dispatch({ type: "reset", state: freshDraft(doc) })
+  }
 
   const save = async () => {
     try {
@@ -78,21 +217,29 @@ export function DocumentInspector({ docPath, onClose, onNavigate }: Props) {
         mode: "patch",
         updateMask: Array.from(dirty),
       })
-      toast.success("Saved")
-      setDirty(new Set())
+      toast.success("Changes saved")
+      dispatch({ type: "saved" })
     } catch (err) {
-      toast.error(err instanceof FirestoreError ? err.message : "Save failed")
+      toast.error(
+        err instanceof FirestoreError ? err.message : "Unable to save changes. Try again.",
+        { duration: Infinity }
+      )
     }
   }
 
   const remove = async () => {
-    if (!confirm(`Delete ${doc.path}?`)) return
     try {
       await deleteDoc.mutateAsync({ path: doc.path })
-      toast.success("Deleted")
+      draftCache.delete(cacheKey)
+      setConfirmDelete(false)
+      toast.success("Document deleted")
+      onDeleted?.()
       onClose()
     } catch (err) {
-      toast.error(err instanceof FirestoreError ? err.message : "Delete failed")
+      toast.error(
+        err instanceof FirestoreError ? err.message : "Unable to delete the document. Try again.",
+        { duration: Infinity }
+      )
     }
   }
 
@@ -114,43 +261,16 @@ export function DocumentInspector({ docPath, onClose, onNavigate }: Props) {
                   name={name}
                   value={draft[name]}
                   dirty={dirty.has(name)}
-                  onChange={(next) => {
-                    setDraft({ ...draft, [name]: next })
-                    setDirty(new Set([...dirty, name]))
-                  }}
-                  onRename={(newName) => {
-                    if (!newName || newName === name) return
-                    if (newName in draft) {
-                      toast.error("Field already exists")
-                      return
-                    }
-                    const { [name]: val, ...rest } = draft
-                    setDraft({ ...rest, [newName]: val })
-                    const newDirty = new Set(dirty)
-                    newDirty.delete(name)
-                    newDirty.add(name)
-                    newDirty.add(newName)
-                    setDirty(newDirty)
-                  }}
-                  onDelete={() => {
-                    const rest = { ...draft }
-                    delete rest[name]
-                    setDraft(rest)
-                    setDirty(new Set([...dirty, name]))
-                  }}
+                  onChange={changeField}
+                  onRename={renameField}
+                  onDelete={deleteField}
                 />
               ))}
               <Button
                 variant="outline"
                 size="sm"
                 className="h-7 gap-1 text-xs"
-                onClick={() => {
-                  let i = 1
-                  let name = "newField"
-                  while (name in draft) name = `newField${i++}`
-                  setDraft({ ...draft, [name]: defaultFieldValue("string") })
-                  setDirty(new Set([...dirty, name]))
-                }}
+                onClick={() => dispatch({ type: "add" })}
               >
                 <Plus className="h-3.5 w-3.5" /> Add field
               </Button>
@@ -162,9 +282,7 @@ export function DocumentInspector({ docPath, onClose, onNavigate }: Props) {
         </TabsContent>
 
         <TabsContent value="raw" className="flex-1 overflow-auto">
-          <pre className="p-3 font-mono text-[11px]">
-            {JSON.stringify(plainFields(draft), null, 2)}
-          </pre>
+          <RawJson fields={draft} />
         </TabsContent>
       </Tabs>
 
@@ -173,20 +291,48 @@ export function DocumentInspector({ docPath, onClose, onNavigate }: Props) {
           variant="ghost"
           size="sm"
           className="h-8 gap-1 text-xs text-destructive hover:text-destructive"
-          onClick={remove}
+          onClick={() => setConfirmDelete(true)}
           disabled={deleteDoc.isPending}
         >
           <Trash2 className="h-3.5 w-3.5" /> Delete
         </Button>
-        <Button
-          size="sm"
-          className="h-8 gap-1 text-xs"
-          onClick={save}
-          disabled={!isDirty || writeDoc.isPending}
-        >
-          <Save className="h-3.5 w-3.5" /> Save
-        </Button>
+        <div className="flex items-center gap-2">
+          {isDirty && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-8 text-xs"
+              onClick={discard}
+              disabled={writeDoc.isPending}
+            >
+              Discard changes
+            </Button>
+          )}
+          <Button
+            size="sm"
+            className="h-8 gap-1 text-xs"
+            onClick={save}
+            disabled={!isDirty || writeDoc.isPending}
+          >
+            <Save className="h-3.5 w-3.5" /> Save
+          </Button>
+        </div>
       </div>
+
+      <ConfirmDialog
+        open={confirmDelete}
+        onOpenChange={setConfirmDelete}
+        title="Delete this document?"
+        description={
+          <>
+            <span className="break-all font-mono">{doc.path}</span> will be
+            permanently deleted. This can’t be undone.
+          </>
+        }
+        confirmLabel="Delete document"
+        onConfirm={remove}
+        busy={deleteDoc.isPending}
+      />
     </div>
   )
 }
@@ -195,13 +341,24 @@ interface FieldRowProps {
   name: string
   value: FieldValue
   dirty: boolean
-  onChange: (next: FieldValue) => void
-  onRename: (next: string) => void
-  onDelete: () => void
+  onChange: (name: string, next: FieldValue) => void
+  /** Returns an error message when the rename is rejected. */
+  onRename: (name: string, next: string) => string | null
+  onDelete: (name: string) => void
 }
 
-function FieldRow({ name, value, dirty, onChange, onRename, onDelete }: FieldRowProps) {
+// Memoized with name-keyed handlers, so editing one field re-renders one row.
+const FieldRow = memo(function FieldRow({
+  name,
+  value,
+  dirty,
+  onChange,
+  onRename,
+  onDelete,
+}: FieldRowProps) {
   const [localName, setLocalName] = useState(name)
+  const [renameError, setRenameError] = useState<string | null>(null)
+  const errorId = useId()
   return (
     <div
       className={cn(
@@ -211,23 +368,51 @@ function FieldRow({ name, value, dirty, onChange, onRename, onDelete }: FieldRow
     >
       <div className="mb-2 flex items-center gap-2">
         <Input
+          aria-label={`Name of field ${name}`}
+          aria-invalid={!!renameError}
+          aria-describedby={renameError ? errorId : undefined}
           className="h-7 flex-1 font-mono text-xs"
           value={localName}
-          onChange={(e) => setLocalName(e.target.value)}
-          onBlur={() => onRename(localName)}
+          onChange={(e) => {
+            setLocalName(e.target.value)
+            setRenameError(null)
+          }}
+          onBlur={() => setRenameError(onRename(name, localName.trim()))}
         />
         {dirty && (
-          <Badge variant="outline" className="text-[10px]">
-            modified
+          <Badge variant="outline" className="text-2xs">
+            Modified
           </Badge>
         )}
-        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={onDelete}>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-7 w-7"
+          aria-label={`Delete field ${name}`}
+          onClick={() => onDelete(name)}
+        >
           <Trash2 className="h-3.5 w-3.5" />
         </Button>
       </div>
-      <FieldEditor value={value} onChange={onChange} compact />
+      {renameError && (
+        <p id={errorId} className="mb-2 text-xs text-destructive">
+          {renameError}
+        </p>
+      )}
+      <FieldEditor
+        value={value}
+        onChange={(next) => onChange(name, next)}
+        label={name}
+      />
     </div>
   )
+})
+
+// A component, not inline JSX, so the document is only stringified while the
+// Raw JSON tab is open (inactive tab content isn't mounted).
+function RawJson({ fields }: { fields: Record<string, FieldValue> }) {
+  const json = useMemo(() => JSON.stringify(plainFields(fields), null, 2), [fields])
+  return <pre className="p-3 font-mono text-2xs">{json}</pre>
 }
 
 function InspectorHeader({
@@ -242,14 +427,20 @@ function InspectorHeader({
   return (
     <div className="flex items-center gap-2 border-b px-3 py-2">
       <div className="min-w-0 flex-1">
-        <p className="truncate font-mono text-xs">{path}</p>
+        <p className="truncate font-mono text-xs" title={path}>{path}</p>
         {dirty && (
-          <Badge variant="outline" className="mt-1 text-[10px]">
-            unsaved changes
+          <Badge variant="outline" className="mt-1 text-2xs">
+            Unsaved changes
           </Badge>
         )}
       </div>
-      <Button variant="ghost" size="icon" className="h-7 w-7" onClick={onClose}>
+      <Button
+        variant="ghost"
+        size="icon"
+        className="h-7 w-7"
+        aria-label="Close inspector"
+        onClick={onClose}
+      >
         <X className="h-4 w-4" />
       </Button>
     </div>
@@ -272,7 +463,7 @@ function SubcollectionsList({
     )
   }
   if (error) {
-    return <p className="p-3 text-xs text-destructive">Failed to load subcollections</p>
+    return <p className="p-3 text-xs text-destructive">Unable to load subcollections. Try again.</p>
   }
   if (!data || data.length === 0) {
     return <p className="p-3 text-xs text-muted-foreground">No subcollections</p>

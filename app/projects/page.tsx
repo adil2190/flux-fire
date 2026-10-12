@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
 import { useSession, signOut } from "next-auth/react"
 import { toast } from "sonner"
@@ -11,6 +11,7 @@ import {
   Loader2,
   LogOut,
   FolderOpen,
+  MapPin,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -22,7 +23,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
-import { useProjects, useProjectConfig } from "@/hooks/use-projects"
+import { useProjects, projectConfigQueryOptions } from "@/hooks/use-projects"
 import { useQueryClient } from "@tanstack/react-query"
 import { useProjectStore } from "@/stores/project-store"
 import type { FirebaseProject } from "@/types/project"
@@ -32,13 +33,12 @@ export default function ProjectsPage() {
   const qc = useQueryClient()
   const { data: session } = useSession()
   const [search, setSearch] = useState("")
-  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null)
+  const [connectingId, setConnectingId] = useState<string | null>(null)
 
-  const { data, isLoading, error } = useProjects()
-  const { data: configData, isLoading: configLoading } = useProjectConfig(
-    selectedProjectId ?? undefined
-  )
-  const { setSelectedProject, setFirebaseConfig, disconnect } = useProjectStore()
+  const { data, isLoading, error, refetch, isFetching } = useProjects()
+  const setSelectedProject = useProjectStore((s) => s.setSelectedProject)
+  const setFirebaseConfig = useProjectStore((s) => s.setFirebaseConfig)
+  const disconnect = useProjectStore((s) => s.disconnect)
 
   const handleSignOut = () => {
     qc.removeQueries({ queryKey: ["firestore"] })
@@ -57,18 +57,23 @@ export default function ProjectsPage() {
   )
 
   const handleSelectProject = async (project: FirebaseProject) => {
-    setSelectedProjectId(project.projectId)
+    if (connectingId) return
+    setConnectingId(project.projectId)
+    try {
+      const { config } = await qc.fetchQuery(
+        projectConfigQueryOptions(project.projectId)
+      )
+      setSelectedProject(project)
+      setFirebaseConfig(config)
+      toast.success(`Connected to ${project.displayName}`)
+      router.push("/firestore")
+    } catch {
+      setConnectingId(null)
+      toast.error(`Unable to connect to ${project.displayName}. Try again.`, {
+        duration: Infinity,
+      })
+    }
   }
-
-  useEffect(() => {
-    if (!configData?.config || !selectedProjectId) return
-    const project = projects.find((p) => p.projectId === selectedProjectId)
-    if (!project) return
-    setSelectedProject(project)
-    setFirebaseConfig(configData.config)
-    toast.success(`Connected to ${project.displayName}`)
-    router.push("/firestore")
-  }, [configData, selectedProjectId, projects, setSelectedProject, setFirebaseConfig, router])
 
   const userInitials = session?.user?.name
     ?.split(" ")
@@ -113,7 +118,7 @@ export default function ProjectsPage() {
       {/* Main Content */}
       <main className="mx-auto max-w-6xl px-4 py-8">
         <div className="mb-8">
-          <h1 className="text-3xl font-bold">Your Firebase Projects</h1>
+          <h1 className="text-3xl font-bold">Your Firebase projects</h1>
           <p className="mt-2 text-muted-foreground">
             Select a project to start managing your Firestore data and Authentication
           </p>
@@ -121,8 +126,10 @@ export default function ProjectsPage() {
 
         {/* Search */}
         <div className="relative mb-6">
-          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+          <Search aria-hidden className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
           <Input
+            type="search"
+            aria-label="Search projects"
             placeholder="Search projects..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
@@ -142,14 +149,16 @@ export default function ProjectsPage() {
         {error && (
           <div className="rounded-lg border border-destructive/50 bg-destructive/10 p-6 text-center">
             <p className="text-destructive">
-              Failed to load projects. Please try again.
+              Unable to load your projects. Check your connection and try again.
             </p>
             <Button
               variant="outline"
               className="mt-4"
-              onClick={() => window.location.reload()}
+              disabled={isFetching}
+              onClick={() => void refetch()}
             >
-              Retry
+              {isFetching && <Loader2 className="h-4 w-4 animate-spin" />}
+              Try again
             </Button>
           </div>
         )}
@@ -158,7 +167,7 @@ export default function ProjectsPage() {
         {!isLoading && !error && projects.length === 0 && (
           <div className="flex flex-col items-center justify-center py-16 text-center">
             <FolderOpen className="h-16 w-16 text-muted-foreground/50" />
-            <h2 className="mt-4 text-xl font-semibold">No Firebase Projects</h2>
+            <h2 className="mt-4 text-xl font-semibold">No Firebase projects</h2>
             <p className="mt-2 max-w-md text-muted-foreground">
               You don&apos;t have any Firebase projects yet. Create one in the{" "}
               <a
@@ -180,8 +189,7 @@ export default function ProjectsPage() {
             {filteredProjects.map((project) => (
               <Card
                 key={project.projectId}
-                className="cursor-pointer transition-all hover:border-primary hover:shadow-md"
-                onClick={() => handleSelectProject(project)}
+                className="relative transition-[border-color,box-shadow] hover:border-primary hover:shadow-md has-[button:focus-visible]:border-ring has-[button:focus-visible]:ring-[3px] has-[button:focus-visible]:ring-ring"
               >
                 <CardContent className="p-6">
                   <div className="flex items-start gap-4">
@@ -190,18 +198,31 @@ export default function ProjectsPage() {
                     </div>
                     <div className="min-w-0 flex-1">
                       <h3 className="truncate font-semibold">
-                        {project.displayName}
+                        {/* The button's ::after covers the whole card, so the card stays one click target. */}
+                        <button
+                          type="button"
+                          className="max-w-full truncate text-left outline-none after:absolute after:inset-0 after:rounded-xl"
+                          title={project.displayName}
+                          aria-busy={connectingId === project.projectId}
+                          onClick={() => handleSelectProject(project)}
+                        >
+                          {project.displayName}
+                        </button>
                       </h3>
-                      <p className="truncate text-sm text-muted-foreground">
+                      <p
+                        className="truncate text-sm text-muted-foreground"
+                        title={project.projectId}
+                      >
                         {project.projectId}
                       </p>
                       {project.resources?.locationId && (
-                        <p className="mt-1 text-xs text-muted-foreground">
-                          📍 {project.resources.locationId}
+                        <p className="mt-1 flex items-center gap-1 text-xs text-muted-foreground">
+                          <MapPin aria-hidden className="h-3 w-3 shrink-0" />
+                          {project.resources.locationId}
                         </p>
                       )}
                     </div>
-                    {configLoading && selectedProjectId === project.projectId && (
+                    {connectingId === project.projectId && (
                       <Loader2 className="h-5 w-5 animate-spin text-primary" />
                     )}
                   </div>
@@ -217,6 +238,9 @@ export default function ProjectsPage() {
             <p className="text-muted-foreground">
               No projects match &quot;{search}&quot;
             </p>
+            <Button variant="outline" className="mt-4" onClick={() => setSearch("")}>
+              Clear search
+            </Button>
           </div>
         )}
       </main>

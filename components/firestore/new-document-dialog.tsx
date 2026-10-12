@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useRef, useState } from "react"
 import { toast } from "sonner"
 import {
   Dialog,
@@ -28,12 +28,15 @@ interface Props {
 export function NewDocumentDialog({ open, onOpenChange, collectionPath, onCreated }: Props) {
   const [docId, setDocId] = useState("")
   const [autoId, setAutoId] = useState(true)
+  const [idError, setIdError] = useState<string | null>(null)
+  const idInputRef = useRef<HTMLInputElement>(null)
   const writeDoc = useWriteDocument()
 
   const submit = async () => {
     const id = autoId ? randomId() : docId.trim()
     if (!id) {
-      toast.error("Document ID required")
+      setIdError("Enter a document ID, or turn on Auto-generated ID.")
+      idInputRef.current?.focus()
       return
     }
     const path = joinPath(collectionPath, id)
@@ -48,7 +51,12 @@ export function NewDocumentDialog({ open, onOpenChange, collectionPath, onCreate
       onOpenChange(false)
       setDocId("")
     } catch (err) {
-      toast.error(err instanceof FirestoreError ? err.message : "Create failed")
+      toast.error(
+        err instanceof FirestoreError
+          ? err.message
+          : "Unable to create the document. Try again.",
+        { duration: Infinity }
+      )
     }
   }
 
@@ -61,27 +69,55 @@ export function NewDocumentDialog({ open, onOpenChange, collectionPath, onCreate
             in {collectionPath}
           </DialogDescription>
         </DialogHeader>
-        <div className="space-y-3">
+        <form
+          id="new-document-form"
+          className="space-y-3"
+          onSubmit={(e) => {
+            e.preventDefault()
+            void submit()
+          }}
+        >
           <div className="flex items-center justify-between">
             <Label htmlFor="auto-id" className="text-xs">Auto-generated ID</Label>
-            <Switch id="auto-id" checked={autoId} onCheckedChange={setAutoId} />
+            <Switch
+              id="auto-id"
+              checked={autoId}
+              onCheckedChange={(checked) => {
+                setAutoId(checked)
+                setIdError(null)
+              }}
+            />
           </div>
           {!autoId && (
             <div className="space-y-1">
               <Label htmlFor="doc-id" className="text-xs">Document ID</Label>
               <Input
                 id="doc-id"
+                ref={idInputRef}
                 className="font-mono text-xs"
                 value={docId}
-                onChange={(e) => setDocId(e.target.value)}
+                aria-invalid={!!idError}
+                aria-describedby={idError ? "doc-id-error" : undefined}
+                onChange={(e) => {
+                  setDocId(e.target.value)
+                  setIdError(null)
+                }}
                 placeholder="abc123"
+                autoComplete="off"
               />
+              {idError && (
+                <p id="doc-id-error" className="text-xs text-destructive">
+                  {idError}
+                </p>
+              )}
             </div>
           )}
-        </div>
+        </form>
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
-          <Button onClick={submit} disabled={writeDoc.isPending}>Create</Button>
+          <Button type="submit" form="new-document-form" disabled={writeDoc.isPending}>
+            Create document
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

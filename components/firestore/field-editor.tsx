@@ -17,7 +17,8 @@ import type { FieldKind, FieldValue } from "@/types/firestore"
 interface Props {
   value: FieldValue
   onChange: (next: FieldValue) => void
-  compact?: boolean
+  /** Names the value for assistive tech, e.g. the field name or "Item 2". */
+  label?: string
 }
 
 const KIND_OPTIONS: { value: FieldKind; label: string }[] = [
@@ -34,7 +35,7 @@ const KIND_OPTIONS: { value: FieldKind; label: string }[] = [
   { value: "bytes", label: "bytes (base64)" },
 ]
 
-export function FieldEditor({ value, onChange, compact }: Props) {
+export function FieldEditor({ value, onChange, label = "Field" }: Props) {
   return (
     <div className="flex w-full flex-col gap-2">
       <div className="flex items-center gap-2">
@@ -42,7 +43,7 @@ export function FieldEditor({ value, onChange, compact }: Props) {
           value={value.kind}
           onValueChange={(kind) => onChange(coerceKind(value, kind as FieldKind))}
         >
-          <SelectTrigger className="h-8 w-32 text-xs">
+          <SelectTrigger className="h-8 w-32 text-xs" aria-label={`${label} type`}>
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -54,28 +55,24 @@ export function FieldEditor({ value, onChange, compact }: Props) {
           </SelectContent>
         </Select>
         <div className="min-w-0 flex-1">
-          <ScalarEditor value={value} onChange={onChange} compact={compact} />
+          <ScalarEditor value={value} onChange={onChange} label={label} />
         </div>
       </div>
       {(value.kind === "array" || value.kind === "map") && (
-        <ContainerEditor value={value} onChange={onChange} />
+        <ContainerEditor value={value} onChange={onChange} label={label} />
       )}
     </div>
   )
 }
 
-function ScalarEditor({ value, onChange, compact }: Props) {
+function ScalarEditor({ value, onChange, label = "Field" }: Props) {
+  const valueLabel = `${label} value`
   switch (value.kind) {
     case "string":
-      return compact ? (
+      return (
         <Input
           className="h-8 text-xs"
-          value={value.value}
-          onChange={(e) => onChange({ kind: "string", value: e.target.value })}
-        />
-      ) : (
-        <Textarea
-          className="min-h-[60px] text-xs"
+          aria-label={valueLabel}
           value={value.value}
           onChange={(e) => onChange({ kind: "string", value: e.target.value })}
         />
@@ -84,6 +81,7 @@ function ScalarEditor({ value, onChange, compact }: Props) {
       return (
         <Input
           className="h-8 text-xs"
+          aria-label={valueLabel}
           inputMode="numeric"
           value={value.value}
           onChange={(e) => {
@@ -98,6 +96,7 @@ function ScalarEditor({ value, onChange, compact }: Props) {
       return (
         <Input
           className="h-8 text-xs"
+          aria-label={valueLabel}
           type="number"
           step="any"
           value={Number.isFinite(value.value) ? value.value : ""}
@@ -110,6 +109,7 @@ function ScalarEditor({ value, onChange, compact }: Props) {
       return (
         <div className="flex h-8 items-center">
           <Switch
+            aria-label={valueLabel}
             checked={value.value}
             onCheckedChange={(v) => onChange({ kind: "boolean", value: v })}
           />
@@ -121,6 +121,7 @@ function ScalarEditor({ value, onChange, compact }: Props) {
       return (
         <Input
           className="h-8 text-xs"
+          aria-label={valueLabel}
           type="datetime-local"
           value={toLocalDatetime(value.value)}
           onChange={(e) =>
@@ -135,6 +136,7 @@ function ScalarEditor({ value, onChange, compact }: Props) {
             className="h-8 text-xs"
             type="number"
             step="any"
+            aria-label={`${label} latitude`}
             placeholder="lat"
             value={value.lat}
             onChange={(e) =>
@@ -145,6 +147,7 @@ function ScalarEditor({ value, onChange, compact }: Props) {
             className="h-8 text-xs"
             type="number"
             step="any"
+            aria-label={`${label} longitude`}
             placeholder="lng"
             value={value.lng}
             onChange={(e) =>
@@ -157,6 +160,7 @@ function ScalarEditor({ value, onChange, compact }: Props) {
       return (
         <Input
           className="h-8 font-mono text-xs"
+          aria-label={valueLabel}
           placeholder="users/abc"
           value={value.path}
           onChange={(e) => onChange({ kind: "reference", path: e.target.value })}
@@ -166,6 +170,7 @@ function ScalarEditor({ value, onChange, compact }: Props) {
       return (
         <Textarea
           className="min-h-[60px] font-mono text-xs"
+          aria-label={valueLabel}
           placeholder="base64"
           value={value.base64}
           onChange={(e) => onChange({ kind: "bytes", base64: e.target.value })}
@@ -183,7 +188,7 @@ function ScalarEditor({ value, onChange, compact }: Props) {
   }
 }
 
-function ContainerEditor({ value, onChange }: Props) {
+function ContainerEditor({ value, onChange, label = "Field" }: Props) {
   if (value.kind === "array") {
     return (
       <div className="ml-4 flex flex-col gap-2 border-l pl-3">
@@ -200,7 +205,7 @@ function ContainerEditor({ value, onChange }: Props) {
                   arr[idx] = next
                   onChange({ kind: "array", value: arr })
                 }}
-                compact
+                label={`${label} item ${idx}`}
               />
             </div>
             <Button
@@ -208,6 +213,7 @@ function ContainerEditor({ value, onChange }: Props) {
               variant="ghost"
               size="icon"
               className="h-7 w-7"
+              aria-label={`Remove ${label} item ${idx}`}
               onClick={() => {
                 const arr = value.value.filter((_, i) => i !== idx)
                 onChange({ kind: "array", value: arr })
@@ -229,7 +235,7 @@ function ContainerEditor({ value, onChange }: Props) {
             })
           }
         >
-          <Plus className="h-3.5 w-3.5" /> Add
+          <Plus className="h-3.5 w-3.5" /> Add item
         </Button>
       </div>
     )
@@ -243,6 +249,7 @@ function ContainerEditor({ value, onChange }: Props) {
           <div key={`${key}-${idx}`} className="flex items-start gap-2">
             <Input
               className="mt-0 h-8 w-28 text-xs"
+              aria-label={`${label} key ${key}`}
               value={key}
               onChange={(e) => {
                 const newKey = e.target.value
@@ -262,7 +269,7 @@ function ContainerEditor({ value, onChange }: Props) {
                     value: { ...value.value, [key]: next },
                   })
                 }}
-                compact
+                label={`${label}.${key}`}
               />
             </div>
             <Button
@@ -270,6 +277,7 @@ function ContainerEditor({ value, onChange }: Props) {
               variant="ghost"
               size="icon"
               className="h-7 w-7"
+              aria-label={`Remove key ${key} from ${label}`}
               onClick={() => {
                 const obj = { ...value.value }
                 delete obj[key]
@@ -296,7 +304,7 @@ function ContainerEditor({ value, onChange }: Props) {
             })
           }}
         >
-          <Plus className="h-3.5 w-3.5" /> Add
+          <Plus className="h-3.5 w-3.5" /> Add key
         </Button>
       </div>
     )

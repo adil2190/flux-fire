@@ -1,6 +1,6 @@
 "use client"
 
-import { useQuery } from "@tanstack/react-query"
+import { queryOptions, useQuery } from "@tanstack/react-query"
 import type { FirebaseProject, FirebaseConfig } from "@/types/project"
 
 interface ProjectsResponse {
@@ -57,8 +57,9 @@ export function useProjectAccess(
   })
 }
 
-export function useProjectConfig(projectId: string | undefined) {
-  return useQuery<ConfigResponse>({
+/** Shared so the project picker can fetch the config from a click handler. */
+export function projectConfigQueryOptions(projectId: string) {
+  return queryOptions<ConfigResponse>({
     queryKey: ["firebase-config", projectId],
     queryFn: async () => {
       const response = await fetch(`/api/projects/${projectId}/config`, {
@@ -69,6 +70,5 @@ export function useProjectConfig(projectId: string | undefined) {
       }
       return response.json()
     },
-    enabled: !!projectId,
   })
 }

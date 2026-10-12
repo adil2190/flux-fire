@@ -1,4 +1,4 @@
-import { Flame } from "lucide-react"
+import { Database, Download, Flame, Terminal } from "lucide-react"
 import { SignInButton } from "@/components/auth/sign-in-button"
 
 export default function LoginPage() {
@@ -20,21 +20,21 @@ export default function LoginPage() {
         <div className="space-y-3 text-sm text-muted-foreground">
           <div className="flex items-center gap-3">
             <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-orange-100 dark:bg-orange-950">
-              <span className="text-orange-600 dark:text-orange-400">🔥</span>
+              <Database aria-hidden className="h-4 w-4 text-orange-700 dark:text-orange-400" />
             </div>
             <span>Browse and edit Firestore collections</span>
           </div>
           <div className="flex items-center gap-3">
             <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-orange-100 dark:bg-orange-950">
-              <span className="text-orange-600 dark:text-orange-400">👥</span>
+              <Terminal aria-hidden className="h-4 w-4 text-orange-700 dark:text-orange-400" />
             </div>
-            <span>Manage Firebase Authentication users</span>
+            <span>Run structured queries with a visual builder</span>
           </div>
           <div className="flex items-center gap-3">
             <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-orange-100 dark:bg-orange-950">
-              <span className="text-orange-600 dark:text-orange-400">⚡</span>
+              <Download aria-hidden className="h-4 w-4 text-orange-700 dark:text-orange-400" />
             </div>
-            <span>Query data with visual builder or JavaScript</span>
+            <span>Export documents as JSON or CSV</span>
           </div>
         </div>
 

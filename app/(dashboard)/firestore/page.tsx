@@ -1,21 +1,24 @@
 "use client"
 
-import { Suspense, useCallback, useMemo, useState } from "react"
+import { Activity, Suspense, memo, useCallback, useMemo, useRef, useState } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
-import { Database, Loader2, Plus } from "lucide-react"
+import { Database, Loader2, Plus, Trash2 } from "lucide-react"
 import { toast } from "sonner"
 import { useProjectStore } from "@/stores/project-store"
 import { useFirestoreSession } from "@/hooks/firestore/use-firestore-session"
 import { useDocuments } from "@/hooks/firestore/use-documents"
 import { useRunQuery } from "@/hooks/firestore/use-run-query"
 import { useBatchCommit } from "@/hooks/firestore/use-batch-commit"
-import { CollectionsTree } from "@/components/firestore/collections-tree"
+import { CollectionsRail, CollectionsTree } from "@/components/firestore/collections-tree"
 import { DocumentsTable } from "@/components/firestore/documents-table"
 import { QueryBuilder } from "@/components/firestore/query-builder"
 import { DocumentInspector } from "@/components/firestore/document-inspector"
 import { BulkActionsBar } from "@/components/firestore/bulk-actions-bar"
-import { ScopeBanner } from "@/components/firestore/scope-banner"
+import { ScopeRequiredBanner } from "@/components/firestore/scope-banner"
+import { FirestoreErrorNotice } from "@/components/firestore/firestore-error-notice"
+import { ExportActions } from "@/components/firestore/export-actions"
 import { NewDocumentDialog } from "@/components/firestore/new-document-dialog"
+import { ConfirmDialog } from "@/components/firestore/confirm-dialog"
 import {
   FirestoreTabsBar,
   type FirestoreTab,
@@ -30,12 +33,39 @@ import {
   parentCollection,
   collectionId as collIdOf,
 } from "@/lib/firestore/paths"
-import { FirestoreError, isPermissionDenied } from "@/lib/firestore/errors"
-import { exportCsv, exportJson, downloadBlob } from "@/lib/firestore/export"
+import { FirestoreError } from "@/lib/firestore/errors"
 import { collectFieldPaths } from "@/lib/firestore/fields"
 import type { QueryState } from "@/types/firestore"
 
 const PAGE_SIZE = 50
+
+// Side panels never take more than this share of the grid, so the documents
+// column and the inspector's actions stay on screen at any width or zoom.
+const COLLECTIONS_SHARE = 0.25
+const INSPECTOR_SHARE = 0.45
+
+/** Clamps a panel's stored width (and its handle's range) to what fits. */
+function fitPanel(
+  value: number,
+  gridWidth: number | null,
+  share: number,
+  min: number,
+  max: number
+) {
+  const cap = gridWidth ? Math.floor(gridWidth * share) : max
+  const hi = Math.max(0, Math.min(max, cap))
+  const lo = Math.min(min, hi)
+  return { value: Math.min(Math.max(value, lo), hi), min: lo, max: hi }
+}
+
+/** The CSS min() covers the first paint, before the grid is measured. */
+function gridTemplate(collectionsPx: number, collapsed: boolean, inspectorPx: number) {
+  return `min(${collectionsPx}px, ${COLLECTIONS_SHARE * 100}%) ${collapsed ? 0 : 8}px minmax(0, 1fr) 8px min(${inspectorPx}px, ${INSPECTOR_SHARE * 100}%)`
+}
+
+function documentsLabel(count: number): string {
+  return count === 1 ? "1 document" : `${count} documents`
+}
 
 function emptyQueryState(collectionPath: string, allDescendants = false): QueryState {
   const parts = collectionPath.split("/").filter(Boolean)
@@ -68,7 +98,7 @@ export default function FirestorePage() {
 function FirestorePageContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
-  const { selectedProject } = useProjectStore()
+  const selectedProject = useProjectStore((s) => s.selectedProject)
   const session = useFirestoreSession()
 
   const path = searchParams.get("path") ?? ""
@@ -79,6 +109,22 @@ function FirestorePageContent() {
   const [collectionsWidth, setCollectionsWidth] = useState(260)
   const [collectionsCollapsed, setCollectionsCollapsed] = useState(false)
   const [inspectorWidth, setInspectorWidth] = useState(420)
+  const [gridWidth, setGridWidth] = useState<number | null>(null)
+  const gridRef = useRef<HTMLDivElement | null>(null)
+  const observeGrid = useCallback((el: HTMLDivElement | null) => {
+    gridRef.current = el
+    if (!el) return
+    // Whole pixels only, so sub-pixel changes (e.g. during the sidebar's
+    // width transition) don't re-render the page.
+    const observer = new ResizeObserver(([entry]) =>
+      setGridWidth(Math.round(entry.contentRect.width))
+    )
+    observer.observe(el)
+    return () => {
+      observer.disconnect()
+      gridRef.current = null
+    }
+  }, [])
   const [fallbackActiveTabId, setFallbackActiveTabId] = useState("initial")
   const urlTabId = searchParams.get("tab")
   const urlOwnerTabId = urlTabId
@@ -102,6 +148,13 @@ function FirestorePageContent() {
       router.push(query ? `/firestore?${query}` : "/firestore")
     },
     [activeTabId, router, searchParams]
+  )
+
+  // Stable across column resizes, so memoized workspaces skip those renders.
+  const navigateTab = useCallback(
+    (next: string, collectionGroup: boolean) =>
+      setUrlPath(next, { cg: collectionGroup }),
+    [setUrlPath]
   )
 
   const visibleTabs = tabs.map((tab) =>
@@ -189,7 +242,7 @@ function FirestorePageContent() {
       <div className="flex h-full items-center justify-center">
         <div className="text-center">
           <Database className="mx-auto h-12 w-12 text-muted-foreground/50" />
-          <h2 className="mt-4 text-xl font-semibold">No Project Selected</h2>
+          <h2 className="mt-4 text-xl font-semibold">No project selected</h2>
           <p className="mt-2 text-muted-foreground">
             Please select a project from the projects page.
           </p>
@@ -201,40 +254,59 @@ function FirestorePageContent() {
   if (session.scopeError) {
     return (
       <div className="p-6">
-        <ScopeBanner />
+        <ScopeRequiredBanner />
       </div>
     )
   }
 
-  const effectiveCollectionsWidth = collectionsCollapsed ? 52 : collectionsWidth
+  const collections = fitPanel(collectionsWidth, gridWidth, COLLECTIONS_SHARE, 180, 480)
+  const inspector = fitPanel(inspectorWidth, gridWidth, INSPECTOR_SHARE, 280, 640)
+  const collectionsColumn = collectionsCollapsed ? 52 : collections.value
+  // Drags restyle the grid directly and commit to state on release.
+  const previewGrid = (collectionsPx: number, inspectorPx: number) => {
+    gridRef.current?.style.setProperty(
+      "grid-template-columns",
+      gridTemplate(collectionsPx, collectionsCollapsed, inspectorPx)
+    )
+  }
 
   return (
     <div
+      ref={observeGrid}
       className="grid h-full grid-rows-[36px_minmax(0,1fr)] overflow-hidden bg-card"
       style={{
-        gridTemplateColumns: `${effectiveCollectionsWidth}px ${collectionsCollapsed ? 0 : 8}px minmax(320px, 1fr) 8px ${inspectorWidth}px`,
+        gridTemplateColumns: gridTemplate(
+          collectionsColumn,
+          collectionsCollapsed,
+          inspector.value
+        ),
       }}
     >
+      <h1 className="sr-only">Firestore data for {selectedProject.displayName}</h1>
       <div className="col-start-1 row-span-2 min-h-0 overflow-hidden">
-        <CollectionsTree
-          selectedPath={path}
-          collapsed={collectionsCollapsed}
-          onToggleCollapsed={() => setCollectionsCollapsed((value) => !value)}
-          onSelect={(next) => {
-            if (isCollectionPath(next)) openCollectionTab(next)
-            else setUrlPath(next)
-          }}
-        />
+        {collectionsCollapsed ? (
+          <CollectionsRail onExpand={() => setCollectionsCollapsed(false)} />
+        ) : (
+          <CollectionsTree
+            selectedPath={path}
+            onCollapse={() => setCollectionsCollapsed(true)}
+            onSelect={(next) => {
+              if (isCollectionPath(next)) openCollectionTab(next)
+              else setUrlPath(next)
+            }}
+          />
+        )}
       </div>
 
       {!collectionsCollapsed && (
         <ColumnResizeHandle
           label="collections"
-          value={collectionsWidth}
-          min={180}
-          max={480}
+          value={collections.value}
+          min={collections.min}
+          max={collections.max}
           edge="left"
           className="col-start-2 row-span-2 row-start-1"
+          onPreview={(value) => previewGrid(value, inspector.value)}
           onChange={setCollectionsWidth}
         />
       )}
@@ -251,65 +323,73 @@ function FirestorePageContent() {
 
       <ColumnResizeHandle
         label="document inspector"
-        value={inspectorWidth}
-        min={280}
-        max={640}
+        value={inspector.value}
+        min={inspector.min}
+        max={inspector.max}
         edge="right"
         className="col-start-4 row-start-2"
+        onPreview={(value) => previewGrid(collectionsColumn, value)}
         onChange={setInspectorWidth}
       />
 
+      {/* Hidden tabs keep their state but pause effects and queries, so
+          writes only refetch what the visible tab shows. */}
       {visibleTabs.map((tab) => (
-        <FirestoreWorkspace
+        <Activity
           key={tab.id}
-          tab={tab}
-          active={tab.id === activeTabId}
-          onNavigate={(next, collectionGroup) =>
-            setUrlPath(next, { cg: collectionGroup })
-          }
-        />
+          mode={tab.id === activeTabId ? "visible" : "hidden"}
+        >
+          <FirestoreWorkspace
+            tabId={tab.id}
+            path={tab.path}
+            collectionGroup={tab.collectionGroup}
+            onNavigate={navigateTab}
+          />
+        </Activity>
       ))}
     </div>
   )
 }
 
 interface FirestoreWorkspaceProps {
-  tab: FirestoreTab
-  active: boolean
+  tabId: string
+  path: string
+  collectionGroup: boolean
   onNavigate: (path: string, collectionGroup: boolean) => void
 }
 
-function FirestoreWorkspace({
-  tab,
-  active,
+const FirestoreWorkspace = memo(function FirestoreWorkspace({
+  tabId,
+  path,
+  collectionGroup,
   onNavigate,
 }: FirestoreWorkspaceProps) {
   const collectionPath = (() => {
-    if (!tab.path) return ""
-    if (isCollectionPath(tab.path)) return tab.path
-    if (isDocPath(tab.path)) return parentCollection(tab.path) ?? ""
+    if (!path) return ""
+    if (isCollectionPath(path)) return path
+    if (isDocPath(path)) return parentCollection(path) ?? ""
     return ""
   })()
-  const docPath = isDocPath(tab.path) ? tab.path : null
+  const docPath = isDocPath(path) ? path : null
+  const panelRef = useRef<HTMLDivElement>(null)
 
   return (
     <>
       <div
-        id={`firestore-panel-${tab.id}`}
+        ref={panelRef}
+        id={`firestore-panel-${tabId}`}
         role="tabpanel"
-        aria-labelledby={`firestore-tab-${tab.id}`}
-        hidden={!active}
-        className="col-start-3 row-start-2 flex min-h-0 flex-col overflow-hidden"
+        aria-labelledby={`firestore-tab-${tabId}`}
+        tabIndex={-1}
+        className="col-start-3 row-start-2 flex min-h-0 flex-col overflow-hidden outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
       >
         {collectionPath ? (
           <CollectionView
-            key={`${collectionPath}|${tab.collectionGroup}`}
+            key={`${collectionPath}|${collectionGroup}`}
             collectionPath={collectionPath}
-            cgFlag={tab.collectionGroup}
+            cgFlag={collectionGroup}
             docPath={docPath}
-            onOpenDocument={(next) =>
-              onNavigate(next, tab.collectionGroup)
-            }
+            onOpenDocument={(next) => onNavigate(next, collectionGroup)}
           />
         ) : (
           <div className="flex flex-1 items-center justify-center text-center text-sm text-muted-foreground">
@@ -321,8 +401,8 @@ function FirestoreWorkspace({
         )}
       </div>
 
-      <div
-        hidden={!active}
+      <aside
+        aria-label="Document inspector"
         className="col-start-5 row-start-2 min-h-0 overflow-hidden border-l"
       >
         <DocumentInspector
@@ -331,14 +411,17 @@ function FirestoreWorkspace({
             const parent = docPath
               ? parentCollection(docPath) ?? parentDoc(docPath) ?? ""
               : ""
-            onNavigate(parent, tab.collectionGroup)
+            onNavigate(parent, collectionGroup)
+            // Closing (or deleting) removes the focused control; land on the
+            // documents panel instead of the top of the page.
+            requestAnimationFrame(() => panelRef.current?.focus())
           }}
-          onNavigate={(next) => onNavigate(next, tab.collectionGroup)}
+          onNavigate={(next) => onNavigate(next, collectionGroup)}
         />
-      </div>
+      </aside>
     </>
   )
-}
+})
 
 function createTabId(): string {
   return typeof crypto !== "undefined" && "randomUUID" in crypto
@@ -362,6 +445,8 @@ function CollectionView({ collectionPath, cgFlag, docPath, onOpenDocument }: Col
   const [tokenStack, setTokenStack] = useState<(string | undefined)[]>([undefined])
   const [failedPaths, setFailedPaths] = useState<Set<string>>(new Set())
   const [newDocOpen, setNewDocOpen] = useState(false)
+  const [confirmBulkDelete, setConfirmBulkDelete] = useState(false)
+  const tableRef = useRef<HTMLDivElement>(null)
 
   const browse = useDocuments(collectionPath, {
     pageSize: PAGE_SIZE,
@@ -379,12 +464,16 @@ function CollectionView({ collectionPath, cgFlag, docPath, onOpenDocument }: Col
     [browse.data?.documents, queryRun.data]
   )
 
-  const documents = activeQuery ? queryRun.data ?? [] : browse.data?.documents ?? []
+  const documents = useMemo(
+    () => (activeQuery ? queryRun.data ?? [] : browse.data?.documents ?? []),
+    [activeQuery, queryRun.data, browse.data?.documents]
+  )
   const isLoading = activeQuery ? queryRun.isLoading : browse.isLoading
   const error = activeQuery ? queryRun.error : browse.error
-  const errorObj = error instanceof FirestoreError ? error : null
-  const showPermissionBanner = !!errorObj && isPermissionDenied(errorObj)
-  const indexUrl = errorObj?.indexUrl
+  const selectedDocuments = useMemo(
+    () => documents.filter((d) => selection.has(d.path)),
+    [documents, selection]
+  )
 
   const nextPageToken = activeQuery ? undefined : browse.data?.nextPageToken
   const pageNum = tokenStack.length
@@ -393,11 +482,11 @@ function CollectionView({ collectionPath, cgFlag, docPath, onOpenDocument }: Col
     <>
       <div className="flex items-center justify-between border-b px-4 py-2">
         <div className="flex items-center gap-2">
-          <Badge variant="outline" className="font-mono text-[11px]">
+          <Badge variant="outline" className="font-mono text-2xs">
             {collectionPath}
           </Badge>
           {queryState.allDescendants && (
-            <Badge className="text-[11px]">collectionGroup</Badge>
+            <Badge className="text-2xs">collectionGroup</Badge>
           )}
         </div>
         <Button
@@ -424,22 +513,9 @@ function CollectionView({ collectionPath, cgFlag, docPath, onOpenDocument }: Col
         }}
         isRunning={queryRun.isFetching}
       />
-      {showPermissionBanner && (
-        <div className="border-b px-4 py-2">
-          <ScopeBanner variant="permission" message={errorObj?.message} />
-        </div>
-      )}
-      {indexUrl && (
-        <div className="border-b px-4 py-2">
-          <ScopeBanner variant="index" indexUrl={indexUrl} />
-        </div>
-      )}
-      {errorObj && !showPermissionBanner && !indexUrl && (
-        <div className="border-b bg-destructive/10 px-4 py-2 text-xs text-destructive">
-          {errorObj.message}
-        </div>
-      )}
+      <FirestoreErrorNotice error={error} />
       <DocumentsTable
+        ref={tableRef}
         documents={documents}
         isLoading={isLoading}
         selectedId={docPath}
@@ -467,38 +543,32 @@ function CollectionView({ collectionPath, cgFlag, docPath, onOpenDocument }: Col
               }
         }
       />
-      <BulkActionsBar
-        count={selection.size}
+      <BulkActionsBar count={selection.size} onClear={() => setSelection(new Set())}>
+        <ExportActions
+          documents={selectedDocuments}
+          filenameBase={collIdOf(collectionPath)}
+        />
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-7 gap-1 text-xs text-destructive hover:text-destructive"
+          disabled={batch.isPending}
+          onClick={() => setConfirmBulkDelete(true)}
+        >
+          <Trash2 className="h-3.5 w-3.5" /> Delete
+        </Button>
+      </BulkActionsBar>
+      <ConfirmDialog
+        open={confirmBulkDelete}
+        onOpenChange={setConfirmBulkDelete}
+        title={`Delete ${documentsLabel(selection.size)}?`}
+        description={`The selected ${selection.size === 1 ? "document" : "documents"} will be permanently deleted. This can’t be undone.`}
+        confirmLabel={`Delete ${documentsLabel(selection.size)}`}
         busy={batch.isPending}
-        onClear={() => setSelection(new Set())}
-        onCopyIds={async () => {
-          const ids = documents
-            .filter((d) => selection.has(d.path))
-            .map((d) => d.id)
-            .join("\n")
-          await navigator.clipboard.writeText(ids)
-          toast.success(`Copied ${selection.size} ids`)
-        }}
-        onExportJson={() => {
-          const docs = documents.filter((d) => selection.has(d.path))
-          downloadBlob(
-            exportJson(docs),
-            `${collIdOf(collectionPath)}-${Date.now()}.json`,
-            "application/json"
-          )
-        }}
-        onExportCsv={() => {
-          const docs = documents.filter((d) => selection.has(d.path))
-          downloadBlob(
-            exportCsv(docs),
-            `${collIdOf(collectionPath)}-${Date.now()}.csv`,
-            "text/csv"
-          )
-        }}
-        onDelete={async () => {
+        onConfirm={async () => {
           const paths = Array.from(selection)
           if (paths.length === 0) return
-          if (!confirm(`Delete ${paths.length} document${paths.length === 1 ? "" : "s"}? This cannot be undone.`)) return
+          setConfirmBulkDelete(false)
           const writes = paths.map((p) => ({ kind: "delete" as const, path: p }))
           const t = toast.loading(`Deleting 0 / ${paths.length}...`)
           try {
@@ -517,17 +587,21 @@ function CollectionView({ collectionPath, cgFlag, docPath, onOpenDocument }: Col
                 )
               )
               toast.error(
-                `Deleted ${result.succeeded}, failed ${result.failed.length}`,
-                { id: t }
+                `Deleted ${documentsLabel(result.succeeded)}. ${documentsLabel(result.failed.length)} could not be deleted and ${result.failed.length === 1 ? "is" : "are"} marked in the table.`,
+                { id: t, duration: Infinity }
               )
             } else {
-              toast.success(`Deleted ${result.succeeded} documents`, { id: t })
+              toast.success(`Deleted ${documentsLabel(result.succeeded)}`, { id: t })
             }
             setSelection(new Set())
+            // The bulk bar (and its Delete button) unmounts with the selection.
+            requestAnimationFrame(() => tableRef.current?.focus())
           } catch (err) {
             toast.error(
-              err instanceof FirestoreError ? err.message : "Bulk delete failed",
-              { id: t }
+              err instanceof FirestoreError
+                ? err.message
+                : "Unable to delete the selected documents. Try again.",
+              { id: t, duration: Infinity }
             )
           }
         }}
